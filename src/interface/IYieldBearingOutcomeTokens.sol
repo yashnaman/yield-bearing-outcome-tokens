@@ -64,6 +64,14 @@ interface IYieldBearingOutcomeTokens {
     /// @return The shares held by `user` on that side.
     function sharesOf(bytes32 marketId, bool outcome, address user) external view returns (uint256);
 
+    /// @notice Returns the dangling outcome-token balance the vault holds for the `outcome` side of market `marketId`:
+    /// tokens received but not yet merged into collateral. Tracked internally per market so a market's balance is
+    /// isolated from others sharing the same ConditionalTokens position id.
+    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
+    /// @param outcome The side to query, `true` for YES and `false` for NO.
+    /// @return The dangling outcome-token balance held on that side.
+    function danglingBalance(bytes32 marketId, bool outcome) external view returns (uint256);
+
     /// @notice Deposits `assets` outcome tokens of the `isYes` side of `marketParams` and mints shares to `to`.
     /// @dev Pulls the outcome tokens from `msg.sender`, then rebalances the market: any complete sets the deposit
     /// enables are merged into collateral and invested.

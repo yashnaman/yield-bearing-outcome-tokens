@@ -3,4 +3,23 @@ src = "src"
 out = "out"
 libs = ["lib"]
 
+# Local profile: keep fuzz/invariant runs light so the suite is fast to iterate on.
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 64
+depth = 64
+fail_on_revert = true
+
+# CI profile: heavy fuzz/invariant depth for stronger assurance. Selected in CI via
+# FOUNDRY_PROFILE=ci (see .github/workflows/test.yml).
+[profile.ci.fuzz]
+runs = 5000
+
+[profile.ci.invariant]
+runs = 256
+depth = 256
+fail_on_revert = true
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

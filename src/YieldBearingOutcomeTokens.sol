@@ -34,7 +34,6 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     uint256 internal constant VIRTUAL_SHARES = 1e6;
     uint256 internal constant VIRTUAL_ASSETS = 1;
 
-    error NoOtherERC1155Accepted();
     error TransferFailed();
     error ApproveFailed();
 
@@ -55,6 +54,12 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// @inheritdoc IYieldBearingOutcomeTokens
     function sharesOf(bytes32 marketId, bool outcome, address user) external view returns (uint256) {
         return side[marketId][outcome].shares[user];
+    }
+
+    /// @inheritdoc IYieldBearingOutcomeTokens
+    /// @dev Exposed explicitly because `Side` holds a mapping and therefore has no auto-generated getter.
+    function danglingBalance(bytes32 marketId, bool outcome) external view returns (uint256) {
+        return side[marketId][outcome].danglingBalance;
     }
 
     /// @dev Returns the market `id`, the hash of (`collateralToken`, `conditionId`, `vaultAdapter`) that uniquely
@@ -86,21 +91,21 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         // shares = assets * (totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS), rounded down.
         uint256 depositSideTotalShares = depositSide.totalShares;
-        uint256 danglingBalance = depositSide.danglingBalance;
+        uint256 dangling = depositSide.danglingBalance;
         shares = assets * (depositSideTotalShares + VIRTUAL_SHARES)
-            / (danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS);
+            / (dangling + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS);
 
         depositSide.totalShares = depositSideTotalShares + shares;
         depositSide.shares[to] += shares;
 
-        danglingBalance += assets;
+        dangling += assets;
 
         // Compute how many complete sets can now be merged. depositSide's dangling balance is always written back;
         // otherSide is only touched when a merge actually happens.
         uint256 otherDanglingBalance = otherSide.danglingBalance;
-        uint256 completeSets = danglingBalance < otherDanglingBalance ? danglingBalance : otherDanglingBalance;
+        uint256 completeSets = dangling < otherDanglingBalance ? dangling : otherDanglingBalance;
 
-        depositSide.danglingBalance = danglingBalance - completeSets;
+        depositSide.danglingBalance = dangling - completeSets;
         if (completeSets > 0) {
             otherSide.danglingBalance = otherDanglingBalance - completeSets;
             _mergeAndInvest(marketParams, completeSets);
@@ -147,26 +152,26 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         Side storage redeemSide = side[id][isYes];
         uint256 redeemSideTotalShares = redeemSide.totalShares;
-        uint256 danglingBalance = redeemSide.danglingBalance;
+        uint256 dangling = redeemSide.danglingBalance;
 
         // Total assets backing this side are the dangling outcome tokens plus the collateral invested through the
         // adapter, since each unit of collateral splits back into one outcome token of this side.
         // assets = shares * (totalAssets + VIRTUAL_ASSETS) / (totalShares + VIRTUAL_SHARES), rounded down.
-        assets = shares * (danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS)
+        assets = shares * (dangling + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS)
             / (redeemSideTotalShares + VIRTUAL_SHARES);
 
         redeemSide.totalShares = redeemSideTotalShares - shares;
         redeemSide.shares[msg.sender] -= shares;
 
-        if (danglingBalance < assets) {
-            uint256 amount = assets - danglingBalance;
+        if (dangling < assets) {
+            uint256 amount = assets - dangling;
             // Settle both sides' dangling balances before the external divest call: a reentrant redeem must observe
             // this side already zeroed, otherwise it could reuse the stale balance to spend another market's tokens.
             side[id][!isYes].danglingBalance += amount;
             redeemSide.danglingBalance = 0;
             _divestAndSplit(marketParams, amount);
         } else {
-            redeemSide.danglingBalance = danglingBalance - assets;
+            redeemSide.danglingBalance = dangling - assets;
         }
 
         CONDITIONAL_TOKENS.safeTransferFrom(address(this), to, positionId, assets, "");
@@ -200,20 +205,16 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     }
 
     /// @inheritdoc IERC1155TokenReceiver
-    /// @dev Only accepts outcome tokens transferred by `CONDITIONAL_TOKENS`.
-    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external view returns (bytes4) {
-        require(msg.sender == address(CONDITIONAL_TOKENS), NoOtherERC1155Accepted());
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
         return this.onERC1155Received.selector;
     }
 
     /// @inheritdoc IERC1155TokenReceiver
-    /// @dev Only accepts outcome tokens transferred by `CONDITIONAL_TOKENS`.
     function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
         external
-        view
+        pure
         returns (bytes4)
     {
-        require(msg.sender == address(CONDITIONAL_TOKENS), NoOtherERC1155Accepted());
         return this.onERC1155BatchReceived.selector;
     }
 }
