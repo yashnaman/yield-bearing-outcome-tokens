@@ -25,7 +25,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     IConditionalTokens public immutable CONDITIONAL_TOKENS;
 
     /// @notice The parent collection id used for every position. Fixed to zero to restrict the vault to top-level
-    /// binary markets.
+    /// markets, i.e. positions not nested under another collection. (Binary-market support is a separate assumption,
+    /// enforced by the hardcoded `{1},{2}` partition.)
     bytes32 public constant PARENT_COLLECTION_ID = bytes32(0);
 
     /// @dev Virtual shares and assets, added to the totals in every share conversion to mitigate share price
@@ -37,7 +38,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     error TransferFailed();
     error ApproveFailed();
 
-    /// @notice The share accounting of each market side, keyed by market `id` then by `isYes`.
+    /// @notice The per-side state (shares and dangling balance) of each market, keyed by market `id` then by `isYes`.
     mapping(bytes32 id => mapping(bool isYes => Side)) internal side;
 
     /// @param conditionalTokens The ConditionalTokens contract backing every market this vault serves.
@@ -56,7 +57,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         return side[marketId][outcome].shares[user];
     }
 
-    /// @dev Returns the market `id`, the hash of the pair (`conditionId`, `vaultAdapter`) that uniquely identifies it.
+    /// @dev Returns the market `id`, the hash of (`collateralToken`, `conditionId`, `vaultAdapter`) that uniquely
+    /// identifies it.
     function _id(MarketParams calldata marketParams) internal pure returns (bytes32) {
         return keccak256(
             abi.encodePacked(
@@ -93,7 +95,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         danglingBalance += assets;
 
-        // figure of merge is needed and do it. Dangling balance update happens for depositSide even if merge isn't possible
+        // Compute how many complete sets can now be merged. depositSide's dangling balance is always written back;
+        // otherSide is only touched when a merge actually happens.
         uint256 otherDanglingBalance = otherSide.danglingBalance;
         uint256 completeSets = danglingBalance < otherDanglingBalance ? danglingBalance : otherDanglingBalance;
 
@@ -122,7 +125,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         );
 
         // Raw transfer with a bool check, the same way ConditionalTokens handles collateral. A token that does not
-        // conform to this cannot back outcome tokens in ConditionalTokens either, so we inherit that limitation here as well
+        // conform to this cannot back outcome tokens in ConditionalTokens either, so we inherit that limitation here.
         require(
             marketParams.collateralToken.transfer(address(marketParams.vaultAdapter), completeSets), TransferFailed()
         );
@@ -146,8 +149,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         uint256 redeemSideTotalShares = redeemSide.totalShares;
         uint256 danglingBalance = redeemSide.danglingBalance;
 
-        // Total assets backing this side are the dangling outcome tokens plus the collateral in the vault, since each
-        // unit of collateral splits back into one outcome token of this side.
+        // Total assets backing this side are the dangling outcome tokens plus the collateral invested through the
+        // adapter, since each unit of collateral splits back into one outcome token of this side.
         // assets = shares * (totalAssets + VIRTUAL_ASSETS) / (totalShares + VIRTUAL_SHARES), rounded down.
         assets = shares * (danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS)
             / (redeemSideTotalShares + VIRTUAL_SHARES);
@@ -157,6 +160,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         if (danglingBalance < assets) {
             uint256 amount = assets - danglingBalance;
+            // Settle both sides' dangling balances before the external divest call: a reentrant redeem must observe
+            // this side already zeroed, otherwise it could reuse the stale balance to spend another market's tokens.
             side[id][!isYes].danglingBalance += amount;
             redeemSide.danglingBalance = 0;
             _divestAndSplit(marketParams, amount);
@@ -181,7 +186,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         // `splitPosition` pulls the collateral from this contract, so approve it first. Raw approve with a bool check,
         // the same way ConditionalTokens handles collateral; a token that does not conform cannot back outcome tokens
-        // in ConditionalTokens either, so we inherit that limitation here as well
+        // in ConditionalTokens either, so we inherit that limitation here.
         require(marketParams.collateralToken.approve(address(CONDITIONAL_TOKENS), amount), ApproveFailed());
 
         CONDITIONAL_TOKENS.splitPosition(
