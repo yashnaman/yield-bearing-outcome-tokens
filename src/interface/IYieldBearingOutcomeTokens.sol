@@ -31,8 +31,7 @@ interface IYieldBearingOutcomeTokens {
     );
 
     /// @notice The parameters that define a market served by the vault.
-    /// @dev The market id is the hash of (`conditionId`, `vaultAdapter`); `collateralToken` is supplied separately
-    /// because it cannot be derived from `conditionId`.
+    /// @dev The market id is the hash of (`collateralToken`, `conditionId`, `vaultAdapter`).
     struct MarketParams {
         /// @dev The market's collateral ERC-20, also the asset a complete set of outcome tokens merges into.
         IERC20 collateralToken;
@@ -43,7 +42,7 @@ interface IYieldBearingOutcomeTokens {
         IVaultAdapter vaultAdapter;
     }
 
-    /// @dev Holds the share accounting for one side (YES or NO) of one market.
+    /// @dev Holds the per-side state (shares and dangling balance) for one side (YES or NO) of one market.
     struct Side {
         uint256 totalShares;
         /// @dev Outcome tokens of this side held by the vault and not yet merged, tracked internally instead of read
@@ -53,13 +52,13 @@ interface IYieldBearingOutcomeTokens {
     }
 
     /// @notice Returns the total shares minted against the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`conditionId`, `vaultAdapter`).
+    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @return The total shares minted on that side.
     function totalShares(bytes32 marketId, bool outcome) external view returns (uint256);
 
     /// @notice Returns the shares held by `user` on the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`conditionId`, `vaultAdapter`).
+    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @param user The address whose shares are queried.
     /// @return The shares held by `user` on that side.
@@ -78,8 +77,8 @@ interface IYieldBearingOutcomeTokens {
         returns (uint256 shares);
 
     /// @notice Burns `shares` of the `isYes` side of `marketParams` and sends the redeemed outcome tokens to `to`.
-    /// @dev Pays out of the dangling outcome tokens first, and only divests collateral from the vault to split into a
-    /// fresh pair when the dangling balance is insufficient.
+    /// @dev Pays out of the dangling outcome tokens first, and only divests collateral through the adapter to split
+    /// into a fresh pair when the dangling balance is insufficient.
     /// @param marketParams The market to redeem from.
     /// @param isYes The side to redeem, `true` for YES and `false` for NO.
     /// @param shares The amount of shares to burn.
