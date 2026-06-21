@@ -43,6 +43,15 @@ interface IYieldBearingOutcomeTokens {
         IVaultAdapter vaultAdapter;
     }
 
+    /// @dev Holds the share accounting for one side (YES or NO) of one market.
+    struct Side {
+        uint256 totalShares;
+        /// @dev Outcome tokens of this side held by the vault and not yet merged, tracked internally instead of read
+        /// from ConditionalTokens so a market's balance is isolated from others sharing the same position id.
+        uint256 danglingBalance;
+        mapping(address user => uint256 shares) shares;
+    }
+
     /// @notice Returns the total shares minted against the `outcome` side of market `marketId`.
     /// @param marketId The id of the market, the hash of its (`conditionId`, `vaultAdapter`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.

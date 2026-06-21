@@ -26,8 +26,4 @@ interface IConditionalTokens is IERC1155 {
         uint256[] calldata partition,
         uint256 amount
     ) external;
-
-    // we might want make sure payOutNumerators for the conditionId user is depositing into has lenght of exactly two
-    //the reason is because we do not support any market other than binary markets for now
-    function payoutNumerators(bytes32 conditionId) external view returns (uint256[] calldata);
 }

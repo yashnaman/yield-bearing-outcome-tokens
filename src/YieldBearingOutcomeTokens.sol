@@ -37,12 +37,6 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     error TransferFailed();
     error ApproveFailed();
 
-    /// @dev Holds the share accounting for one side (YES or NO) of one market.
-    struct Side {
-        uint256 totalShares;
-        mapping(address user => uint256 shares) shares;
-    }
-
     /// @notice The share accounting of each market side, keyed by market `id` then by `isYes`.
     mapping(bytes32 id => mapping(bool isYes => Side)) internal side;
 
@@ -78,62 +72,62 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     {
         bytes32 id = _id(marketParams);
 
-        uint256 indexSet = isYes ? 1 : 2;
         uint256 positionId = CTHelpers.getPositionId(
             address(marketParams.collateralToken),
-            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, indexSet)
+            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, isYes ? 1 : 2)
         );
-
-        // shares = assets * (totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS), rounded down.
-        uint256 totalAssets = CONDITIONAL_TOKENS.balanceOf(address(this), positionId)
-            + marketParams.vaultAdapter.investedBalance(marketParams);
-        shares = assets * (side[id][isYes].totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS);
-
-        side[id][isYes].totalShares += shares;
-        side[id][isYes].shares[to] += shares;
 
         CONDITIONAL_TOKENS.safeTransferFrom(msg.sender, address(this), positionId, assets, "");
 
-        _mergeAndInvest(marketParams);
+        Side storage depositSide = side[id][isYes];
+        Side storage otherSide = side[id][!isYes];
+
+        // shares = assets * (totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS), rounded down.
+        uint256 depositSideTotalShares = depositSide.totalShares;
+        uint256 danglingBalance = depositSide.danglingBalance;
+        shares = assets * (depositSideTotalShares + VIRTUAL_SHARES)
+            / (danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS);
+
+        depositSide.totalShares = depositSideTotalShares + shares;
+        depositSide.shares[to] += shares;
+
+        danglingBalance += assets;
+
+        // figure of merge is needed and do it. Dangling balance update happens for depositSide even if merge isn't possible
+        uint256 otherDanglingBalance = otherSide.danglingBalance;
+        uint256 completeSets = danglingBalance < otherDanglingBalance ? danglingBalance : otherDanglingBalance;
+
+        depositSide.danglingBalance = danglingBalance - completeSets;
+        if (completeSets > 0) {
+            otherSide.danglingBalance = otherDanglingBalance - completeSets;
+            _mergeAndInvest(marketParams, completeSets);
+        }
 
         emit Deposit(id, isYes, msg.sender, to, assets, shares);
     }
 
-    /// @dev Merges as many complete sets as the current YES and NO balances allow into collateral, then sends that
-    /// collateral to the market's adapter to be invested.
-    function _mergeAndInvest(MarketParams calldata marketParams) internal {
-        uint256 yesPositionId = CTHelpers.getPositionId(
-            address(marketParams.collateralToken),
-            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, 1)
+    /// @dev Merges `completeSets` complete sets into collateral, then sends that collateral to the market's adapter to
+    /// be invested.
+    function _mergeAndInvest(MarketParams calldata marketParams, uint256 completeSets) internal {
+        uint256[] memory partition = new uint256[](2);
+        partition[0] = 1;
+        partition[1] = 2;
+
+        // Assumes a binary market: merging the {1},{2} pair returns collateral. If outcomeSlotCount > 2 this instead
+        // mints a combined ERC1155 position rather than returning collateral, so the transfer below reverts and the deposit
+        // fails. The outcome token already deposited on the other side stays redeemable, so there is no self-harm or
+        // stuck funds.
+        CONDITIONAL_TOKENS.mergePositions(
+            marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition, completeSets
         );
-        uint256 noPositionId = CTHelpers.getPositionId(
-            address(marketParams.collateralToken),
-            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, 2)
+
+        // Raw transfer with a bool check, the same way ConditionalTokens handles collateral. A token that does not
+        // conform to this cannot back outcome tokens in ConditionalTokens either, so we inherit that limitation here as well
+        require(
+            marketParams.collateralToken.transfer(address(marketParams.vaultAdapter), completeSets), TransferFailed()
         );
 
-        uint256 yesOutcomeTokenBalance = CONDITIONAL_TOKENS.balanceOf(address(this), yesPositionId);
-        uint256 noOutcomeTokenBalance = CONDITIONAL_TOKENS.balanceOf(address(this), noPositionId);
-
-        // The number of complete sets is bounded by the scarcer side.
-        uint256 completeSets =
-            yesOutcomeTokenBalance > noOutcomeTokenBalance ? noOutcomeTokenBalance : yesOutcomeTokenBalance;
-
-        if (completeSets > 0) {
-            uint256[] memory partition = new uint256[](2);
-            partition[0] = 1;
-            partition[1] = 2;
-
-            CONDITIONAL_TOKENS.mergePositions(
-                marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition, completeSets
-            );
-
-            require(
-                marketParams.collateralToken.transfer(address(marketParams.vaultAdapter), completeSets),
-                TransferFailed()
-            );
-
-            marketParams.vaultAdapter.invest(marketParams, completeSets);
-        }
+        marketParams.vaultAdapter.invest(marketParams, completeSets);
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens
@@ -143,25 +137,31 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     {
         bytes32 id = _id(marketParams);
 
-        uint256 indexSet = isYes ? 1 : 2;
         uint256 positionId = CTHelpers.getPositionId(
             address(marketParams.collateralToken),
-            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, indexSet)
+            CTHelpers.getCollectionId(PARENT_COLLECTION_ID, marketParams.conditionId, isYes ? 1 : 2)
         );
 
-        uint256 danglingBalance = CONDITIONAL_TOKENS.balanceOf(address(this), positionId);
+        Side storage redeemSide = side[id][isYes];
+        uint256 redeemSideTotalShares = redeemSide.totalShares;
+        uint256 danglingBalance = redeemSide.danglingBalance;
 
         // Total assets backing this side are the dangling outcome tokens plus the collateral in the vault, since each
         // unit of collateral splits back into one outcome token of this side.
         // assets = shares * (totalAssets + VIRTUAL_ASSETS) / (totalShares + VIRTUAL_SHARES), rounded down.
-        uint256 totalAssets = danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams);
-        assets = shares * (totalAssets + VIRTUAL_ASSETS) / (side[id][isYes].totalShares + VIRTUAL_SHARES);
+        assets = shares * (danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams) + VIRTUAL_ASSETS)
+            / (redeemSideTotalShares + VIRTUAL_SHARES);
 
-        side[id][isYes].totalShares -= shares;
-        side[id][isYes].shares[msg.sender] -= shares;
+        redeemSide.totalShares = redeemSideTotalShares - shares;
+        redeemSide.shares[msg.sender] -= shares;
 
         if (danglingBalance < assets) {
-            _divestAndSplit(marketParams, assets - danglingBalance);
+            uint256 amount = assets - danglingBalance;
+            side[id][!isYes].danglingBalance += amount;
+            redeemSide.danglingBalance = 0;
+            _divestAndSplit(marketParams, amount);
+        } else {
+            redeemSide.danglingBalance = danglingBalance - assets;
         }
 
         CONDITIONAL_TOKENS.safeTransferFrom(address(this), to, positionId, assets, "");
@@ -179,7 +179,9 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         partition[0] = 1;
         partition[1] = 2;
 
-        // `splitPosition` pulls the collateral from this contract, so approve it first.
+        // `splitPosition` pulls the collateral from this contract, so approve it first. Raw approve with a bool check,
+        // the same way ConditionalTokens handles collateral; a token that does not conform cannot back outcome tokens
+        // in ConditionalTokens either, so we inherit that limitation here as well
         require(marketParams.collateralToken.approve(address(CONDITIONAL_TOKENS), amount), ApproveFailed());
 
         CONDITIONAL_TOKENS.splitPosition(
