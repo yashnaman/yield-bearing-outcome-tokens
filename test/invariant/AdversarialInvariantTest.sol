@@ -32,15 +32,16 @@ contract AdversarialInvariantTest is InvariantBaseTest {
             vaultAdapter: IVaultAdapter(address(evil))
         });
 
-        bytes4[] memory selectors = new bytes4[](6);
+        bytes4[] memory selectors = new bytes4[](7);
         // Honest handlers (operate only on honest markets A/B/C; must never revert).
         selectors[0] = this.depositHandler.selector;
         selectors[1] = this.redeemHandler.selector;
         selectors[2] = this.accrueYieldHandler.selector;
+        selectors[3] = this.donateHandler.selector;
         // Hostile handlers (operate on market D; wrapped in try/catch).
-        selectors[3] = this.evilDepositHandler.selector;
-        selectors[4] = this.evilRedeemHandler.selector;
-        selectors[5] = this.evilConfigHandler.selector;
+        selectors[4] = this.evilDepositHandler.selector;
+        selectors[5] = this.evilRedeemHandler.selector;
+        selectors[6] = this.evilConfigHandler.selector;
         targetSelector(FuzzSelector({addr: address(this), selectors: selectors}));
         targetContract(address(this));
     }
@@ -100,5 +101,10 @@ contract AdversarialInvariantTest is InvariantBaseTest {
         // Condition 2 is untouched by the hostile market.
         _assertPool(conditionId2, true, _one(marketC));
         _assertPool(conditionId2, false, _one(marketC));
+    }
+
+    /// @dev Holders of the honest markets can always exit in full, no matter what the hostile market does.
+    function invariant_honestHoldersCanRedeem() public {
+        assertAllHoldersCanRedeem();
     }
 }

@@ -9,10 +9,11 @@ contract InvariantTest is InvariantBaseTest {
     function setUp() public override {
         super.setUp();
 
-        bytes4[] memory selectors = new bytes4[](3);
+        bytes4[] memory selectors = new bytes4[](4);
         selectors[0] = this.depositHandler.selector;
         selectors[1] = this.redeemHandler.selector;
         selectors[2] = this.accrueYieldHandler.selector;
+        selectors[3] = this.donateHandler.selector;
         targetSelector(FuzzSelector({addr: address(this), selectors: selectors}));
         targetContract(address(this));
     }
@@ -31,5 +32,10 @@ contract InvariantTest is InvariantBaseTest {
     /// @dev Adapters never claim more collateral than the underlying ERC4626 holds.
     function invariant_adapterSolvency() public view {
         assertAdapterSolvency();
+    }
+
+    /// @dev Every holder can always exit: redeeming all shares across every market and side succeeds simultaneously.
+    function invariant_allHoldersCanRedeem() public {
+        assertAllHoldersCanRedeem();
     }
 }

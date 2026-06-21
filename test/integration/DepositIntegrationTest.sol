@@ -52,6 +52,20 @@ contract DepositIntegrationTest is BaseTest {
         assertEq(shares, expected, "share price tracks invested balance");
     }
 
+    /// @dev Shares are credited to `to`, never to the caller, for any receiver address.
+    function testDepositToFuzzedReceiver(address to, uint256 amount) public {
+        amount = bound(amount, MIN_TEST_AMOUNT, MAX_TEST_AMOUNT);
+
+        _mintOutcomeTokens(ALICE, amount);
+        vm.prank(ALICE);
+        uint256 shares = vault.deposit(marketParams, true, amount, to);
+
+        assertEq(vault.sharesOf(id, true, to), shares, "shares credited to receiver");
+        if (to != ALICE) {
+            assertEq(vault.sharesOf(id, true, ALICE), 0, "caller receives nothing when to != caller");
+        }
+    }
+
     function testDepositEmitsEvent() public {
         _mintOutcomeTokens(ALICE, 100);
 

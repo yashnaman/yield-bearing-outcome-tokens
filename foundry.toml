@@ -18,8 +18,8 @@ fail_on_revert = true
 runs = 5000
 
 [profile.ci.invariant]
-runs = 256
-depth = 256
+runs = 1000
+depth = 10000
 fail_on_revert = true
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

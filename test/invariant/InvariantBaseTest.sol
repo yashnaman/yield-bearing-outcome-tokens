@@ -30,6 +30,11 @@ abstract contract InvariantBaseTest is BaseTest {
 
     address[] internal actors;
 
+    /// @dev Ghost: outcome tokens donated straight to the vault (never deposited), keyed by position id. The vault
+    /// prices off internal accounting, not its raw balance, so donations must inflate the pool by exactly this much
+    /// and nothing more.
+    mapping(uint256 positionId => uint256 amount) internal donated;
+
     function setUp() public virtual override {
         super.setUp();
 
@@ -37,6 +42,15 @@ abstract contract InvariantBaseTest is BaseTest {
         // their adapter.
         adapterB = new ERC4626VaultAdapter(IERC4626(address(erc4626)), address(vault));
         vm.label(address(adapterB), "AdapterB");
+
+        // Seed the underlying ERC4626 with a large 1:1 position held by this harness and never withdrawn. This keeps
+        // its share price ~1 across a long run, so honest `invest` calls never round to zero shares (no stranding) and
+        // the gradually-accruing yield can't compound the price to an overflow. A real yield vault is similarly deep
+        // relative to a single market's deposits.
+        uint256 seed = 1e30;
+        collateral.mint(address(this), seed);
+        collateral.approve(address(erc4626), seed);
+        erc4626.deposit(seed, address(this));
 
         // A second binary condition for a market on a separate position-id pool.
         questionId2 = keccak256("question2");
@@ -113,16 +127,27 @@ abstract contract InvariantBaseTest is BaseTest {
         vault.redeem(m, isYes, shares, msg.sender);
     }
 
-    /// @dev Accrues yield into the shared ERC4626 vault, lifting every honest adapter's invested balance. Models
-    /// realistic yield: it only accrues once there is principal to earn on, and at most ~10% of the current balance
-    /// per step, so the underlying share price grows gradually rather than being dumped into an empty vault (which
-    /// would let honest `invest` calls round to zero underlying shares and is not how a real yield vault behaves).
+    /// @dev Accrues yield into the shared ERC4626 vault, lifting every honest adapter's invested balance. Capped in
+    /// absolute terms per step: combined with the large 1:1 seed in `setUp`, this keeps the underlying share price near
+    /// 1 over a long run, so it grows gradually without compounding toward an overflow.
     function accrueYieldHandler(uint256 amount) external {
-        uint256 totalAssets = erc4626.totalAssets();
-        if (totalAssets == 0) return; // no principal yet: nothing to earn yield on
-        amount = bound(amount, 0, totalAssets / 10);
+        amount = bound(amount, 0, MAX_INVARIANT_AMOUNT);
         if (amount == 0) return;
         collateral.mint(address(erc4626), amount);
+    }
+
+    /// @dev Pushes outcome tokens straight onto the vault without going through `deposit`. The vault ignores raw
+    /// balances, so this must never move a share price or let anyone redeem the donated tokens; it should only show up
+    /// as the `donated` ghost in pool conservation.
+    function donateHandler(uint256 marketSeed, bool isYes, uint256 amount) external {
+        IYieldBearingOutcomeTokens.MarketParams memory m = _market(marketSeed);
+        amount = bound(amount, MIN_INVARIANT_AMOUNT, MAX_INVARIANT_AMOUNT);
+
+        _giveOutcomeTokens(msg.sender, m, amount); // mints `amount` of both sides to the sender
+        uint256 positionId = _positionId(IERC20(address(collateral)), m.conditionId, isYes);
+        vm.prank(msg.sender);
+        ct.safeTransferFrom(msg.sender, address(vault), positionId, amount, "");
+        donated[positionId] += amount;
     }
 
     /* INVARIANT BUILDING BLOCKS */
@@ -165,7 +190,30 @@ abstract contract InvariantBaseTest is BaseTest {
         for (uint256 i; i < sharing.length; ++i) {
             sumDangling += vault.danglingBalance(_id(sharing[i]), isYes);
         }
-        assertEq(_vaultPositionBalance(positionId), sumDangling, "pool == sum of dangling balances");
+        assertEq(
+            _vaultPositionBalance(positionId), sumDangling + donated[positionId], "pool == sum of dangling + donated"
+        );
+    }
+
+    /// @dev Solvency / exit-liveness: every tracked actor can redeem their entire share balance on every honest
+    /// market and side, all at once. Performed against a snapshot that is rolled back, so it does not disturb the
+    /// run. A revert here means a holder is stuck — i.e. bad debt — and fails the invariant.
+    function assertAllHoldersCanRedeem() internal {
+        uint256 snap = vm.snapshotState();
+        for (uint256 i; i < markets.length; ++i) {
+            IYieldBearingOutcomeTokens.MarketParams memory m = markets[i];
+            bytes32 mid = _id(m);
+            for (uint256 s; s < 2; ++s) {
+                bool isYes = s == 0;
+                for (uint256 a; a < actors.length; ++a) {
+                    uint256 held = vault.sharesOf(mid, isYes, actors[a]);
+                    if (held == 0) continue;
+                    vm.prank(actors[a]);
+                    vault.redeem(m, isYes, held, actors[a]);
+                }
+            }
+        }
+        vm.revertToState(snap);
     }
 
     /// @dev Asserts the honest adapters never collectively claim more invested collateral than the underlying ERC4626
