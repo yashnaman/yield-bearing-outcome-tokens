@@ -64,7 +64,11 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
     /// @dev Returns the market `id`, the hash of the pair (`conditionId`, `vaultAdapter`) that uniquely identifies it.
     function _id(MarketParams calldata marketParams) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(marketParams.conditionId, address(marketParams.vaultAdapter)));
+        return keccak256(
+            abi.encodePacked(
+                address(marketParams.collateralToken), marketParams.conditionId, address(marketParams.vaultAdapter)
+            )
+        );
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens
@@ -81,8 +85,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         );
 
         // shares = assets * (totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS), rounded down.
-        uint256 totalAssets =
-            CONDITIONAL_TOKENS.balanceOf(address(this), positionId) + marketParams.vaultAdapter.investedBalance();
+        uint256 totalAssets = CONDITIONAL_TOKENS.balanceOf(address(this), positionId)
+            + marketParams.vaultAdapter.investedBalance(marketParams);
         shares = assets * (side[id][isYes].totalShares + VIRTUAL_SHARES) / (totalAssets + VIRTUAL_ASSETS);
 
         side[id][isYes].totalShares += shares;
@@ -128,7 +132,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
                 TransferFailed()
             );
 
-            marketParams.vaultAdapter.invest(completeSets);
+            marketParams.vaultAdapter.invest(marketParams, completeSets);
         }
     }
 
@@ -150,7 +154,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // Total assets backing this side are the dangling outcome tokens plus the collateral in the vault, since each
         // unit of collateral splits back into one outcome token of this side.
         // assets = shares * (totalAssets + VIRTUAL_ASSETS) / (totalShares + VIRTUAL_SHARES), rounded down.
-        uint256 totalAssets = danglingBalance + marketParams.vaultAdapter.investedBalance();
+        uint256 totalAssets = danglingBalance + marketParams.vaultAdapter.investedBalance(marketParams);
         assets = shares * (totalAssets + VIRTUAL_ASSETS) / (side[id][isYes].totalShares + VIRTUAL_SHARES);
 
         side[id][isYes].totalShares -= shares;
@@ -169,7 +173,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// this contract. Internal because splitting only ever happens during a redemption that runs short of dangling
     /// tokens.
     function _divestAndSplit(MarketParams calldata marketParams, uint256 amount) internal {
-        marketParams.vaultAdapter.divest(amount);
+        marketParams.vaultAdapter.divest(marketParams, amount);
 
         uint256[] memory partition = new uint256[](2);
         partition[0] = 1;
