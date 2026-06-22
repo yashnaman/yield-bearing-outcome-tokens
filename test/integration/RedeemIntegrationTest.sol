@@ -56,6 +56,22 @@ contract RedeemIntegrationTest is BaseTest {
         assertEq(ct.balanceOf(RECEIVER, yesPositionId), 100, "tokens sent to `to`, not caller");
     }
 
+    /// @dev The redeemed outcome tokens go to `to`, not the caller, for any receiver that can hold ERC1155.
+    function testRedeemToFuzzedReceiver(address to, uint256 amount) public {
+        amount = bound(amount, MIN_TEST_AMOUNT, MAX_TEST_AMOUNT);
+        // `to` must be able to receive ERC1155: an EOA (no code) and not the zero address.
+        vm.assume(to != address(0) && to.code.length == 0);
+
+        uint256 shares = _deposit(ALICE, true, amount); // unmatched, paid from dangling
+
+        uint256 balBefore = ct.balanceOf(to, yesPositionId);
+        vm.prank(ALICE);
+        uint256 assets = vault.redeem(marketParams, true, shares, to);
+
+        assertEq(assets, amount, "redeems the deposited amount");
+        assertEq(ct.balanceOf(to, yesPositionId) - balBefore, amount, "outcome tokens delivered to receiver");
+    }
+
     /// @dev Redeeming more shares than held underflows and reverts; no payout happens.
     function testRedeemMoreThanOwnedReverts() public {
         uint256 shares = _deposit(ALICE, true, 100);

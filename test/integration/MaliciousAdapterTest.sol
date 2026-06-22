@@ -86,6 +86,8 @@ contract MaliciousAdapterTest is BaseTest {
         try vault.redeem(marketB, true, attackerShares, ATTACKER) returns (uint256 got) {
             // Attacker receives YES tokens, but only ones freshly split from its own collateral plus its own dangling.
             assertEq(ct.balanceOf(ATTACKER, yesPositionId), got, "attacker only receives what it paid for");
+            // No windfall: the payout cannot exceed the attacker's own deposit (100) plus its own funding (1000).
+            assertLe(got, 100 + 1000, "attacker cannot extract more than it put in");
         } catch {}
 
         assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved");
