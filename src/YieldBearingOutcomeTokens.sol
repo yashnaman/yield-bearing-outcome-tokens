@@ -124,16 +124,12 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// @dev Merges `completeSets` complete sets into collateral, then sends that collateral to the market's adapter to
     /// be invested.
     function _mergeAndInvest(MarketParams calldata marketParams, uint256 completeSets) internal {
-        uint256[] memory partition = new uint256[](2);
-        partition[0] = 1;
-        partition[1] = 2;
-
         // Assumes a binary market: merging the {1},{2} pair returns collateral. If outcomeSlotCount > 2 this instead
         // mints a combined ERC1155 position rather than returning collateral, so the transfer below reverts and the deposit
         // fails. The outcome token already deposited on the other side stays redeemable, so there is no self-harm or
         // stuck funds.
         CONDITIONAL_TOKENS.mergePositions(
-            marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition, completeSets
+            marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition(), completeSets
         );
 
         // Raw transfer with a bool check, the same way ConditionalTokens handles collateral. A token that does not
@@ -203,18 +199,25 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     function _divestAndSplit(MarketParams calldata marketParams, uint256 amount) internal {
         marketParams.vaultAdapter.divest(marketParams, amount);
 
-        uint256[] memory partition = new uint256[](2);
-        partition[0] = 1;
-        partition[1] = 2;
-
         // `splitPosition` pulls the collateral from this contract, so approve it first. Raw approve with a bool check,
         // the same way ConditionalTokens handles collateral; a token that does not conform cannot back outcome tokens
         // in ConditionalTokens either, so we inherit that limitation here.
         require(marketParams.collateralToken.approve(address(CONDITIONAL_TOKENS), amount), ApproveFailed());
 
         CONDITIONAL_TOKENS.splitPosition(
-            marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition, amount
+            marketParams.collateralToken, PARENT_COLLECTION_ID, marketParams.conditionId, partition(), amount
         );
+    }
+
+    /// @dev returns the partition for a binary conditional token the partition [1,2] = [0b01, 0b10]
+    function partition() internal pure returns (uint256[] memory partition_) {
+        assembly ("memory-safe") {
+            partition_ := mload(0x40)
+            mstore(partition_, 2)
+            mstore(add(partition_, 0x20), 1)
+            mstore(add(partition_, 0x40), 2)
+            mstore(0x40, add(partition_, 0x60))
+        }
     }
 
     /// @inheritdoc IERC165
