@@ -46,9 +46,9 @@ contract FeeAdapterTest is BaseTest {
 
         // Both holders can still exit; each gets back less than deposited because they share the haircut backing.
         vm.prank(ALICE);
-        uint256 aliceAssets = vault.redeem(feeMarket, true, yesShares, ALICE);
+        uint256 aliceAssets = vault.redeem(feeMarket, true, yesShares, ALICE, ALICE);
         vm.prank(BOB);
-        uint256 bobAssets = vault.redeem(feeMarket, false, noShares, BOB);
+        uint256 bobAssets = vault.redeem(feeMarket, false, noShares, BOB, BOB);
 
         assertLt(aliceAssets, 1000, "YES depositor absorbs part of the fee");
         assertLt(bobAssets, 1000, "NO depositor absorbs part of the fee");

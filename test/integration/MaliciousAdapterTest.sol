@@ -59,7 +59,7 @@ contract MaliciousAdapterTest is BaseTest {
         // The attacker tries to redeem an inflated amount. With no real collateral behind the malicious adapter, the
         // divest+split path can't deliver, so the attempt reverts; it can never reach Alice's tokens.
         vm.prank(ATTACKER);
-        try vault.redeem(marketB, true, attackerShares, ATTACKER) returns (uint256 got) {
+        try vault.redeem(marketB, true, attackerShares, ATTACKER, ATTACKER) returns (uint256 got) {
             // If it somehow succeeded, it could only have paid out the attacker's own dangling (<= 100).
             assertLe(got, 100, "attacker can only ever get its own tokens back");
         } catch {}
@@ -83,7 +83,7 @@ contract MaliciousAdapterTest is BaseTest {
         evil.setFakeBalance(true, 1000);
 
         vm.prank(ATTACKER);
-        try vault.redeem(marketB, true, attackerShares, ATTACKER) returns (uint256 got) {
+        try vault.redeem(marketB, true, attackerShares, ATTACKER, ATTACKER) returns (uint256 got) {
             // Attacker receives YES tokens, but only ones freshly split from its own collateral plus its own dangling.
             assertEq(ct.balanceOf(ATTACKER, yesPositionId), got, "attacker only receives what it paid for");
             // No windfall: the payout cannot exceed the attacker's own deposit (100) plus its own funding (1000).
@@ -112,7 +112,7 @@ contract MaliciousAdapterTest is BaseTest {
         // Redeeming now needs a divest; the short-paid divest makes splitPosition revert.
         vm.prank(ATTACKER);
         vm.expectRevert();
-        vault.redeem(marketB, true, attackerShares, ATTACKER);
+        vault.redeem(marketB, true, attackerShares, ATTACKER, ATTACKER);
 
         // Honest market entirely unaffected.
         uint256 aliceShares = vault.sharesOf(id, true, ALICE);
@@ -131,11 +131,11 @@ contract MaliciousAdapterTest is BaseTest {
         collateral.mint(address(evil), 1000); // ensure divest can pay during the outer call
 
         // On divest, reenter and try to redeem the same shares again.
-        bytes memory reentryData = abi.encodeCall(vault.redeem, (marketB, true, attackerShares, ATTACKER));
+        bytes memory reentryData = abi.encodeCall(vault.redeem, (marketB, true, attackerShares, ATTACKER, ATTACKER));
         evil.setReentrancy(MaliciousVaultAdapter.ReenterOn.DIVEST, address(vault), reentryData);
 
         vm.prank(ATTACKER);
-        try vault.redeem(marketB, true, attackerShares, ATTACKER) {} catch {}
+        try vault.redeem(marketB, true, attackerShares, ATTACKER, ATTACKER) {} catch {}
 
         // No matter the outcome, the honest market's parked tokens are intact and Alice redeems in full.
         assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved through reentrancy");

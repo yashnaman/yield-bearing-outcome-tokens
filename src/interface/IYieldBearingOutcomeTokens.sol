@@ -23,12 +23,25 @@ interface IYieldBearingOutcomeTokens {
     /// @param id The market the redemption was made from.
     /// @param isYes The side redeemed, `true` for YES and `false` for NO.
     /// @param caller The address that initiated the redemption.
+    /// @param onBehalf The address whose shares were burned.
     /// @param to The address that received the outcome tokens.
     /// @param shares The amount of shares burned.
     /// @param amount The amount of outcome tokens redeemed.
     event Redeem(
-        bytes32 indexed id, bool isYes, address indexed caller, address indexed to, uint256 shares, uint256 amount
+        bytes32 indexed id,
+        bool isYes,
+        address indexed caller,
+        address onBehalf,
+        address indexed to,
+        uint256 shares,
+        uint256 amount
     );
+
+    /// @notice Emitted when `authorizer` sets whether `authorized` may act on its behalf.
+    /// @param authorizer The address granting or revoking the authorization.
+    /// @param authorized The address being authorized or deauthorized.
+    /// @param newIsAuthorized The new authorization status.
+    event SetAuthorization(address indexed authorizer, address indexed authorized, bool newIsAuthorized);
 
     /// @notice The parameters that define a market served by the vault.
     /// @dev The market id is the hash of (`collateralToken`, `conditionId`, `vaultAdapter`).
@@ -84,15 +97,29 @@ interface IYieldBearingOutcomeTokens {
         external
         returns (uint256 shares);
 
-    /// @notice Burns `shares` of the `isYes` side of `marketParams` and sends the redeemed outcome tokens to `to`.
+    /// @notice Burns `shares` of the `isYes` side of `marketParams` from `onBehalf` and sends the redeemed outcome
+    /// tokens to `to`.
     /// @dev Pays out of the dangling outcome tokens first, and only divests collateral through the adapter to split
-    /// into a fresh pair when the dangling balance is insufficient.
+    /// into a fresh pair when the dangling balance is insufficient. `msg.sender` must be `onBehalf` itself or an
+    /// address it has authorized via `setAuthorization`.
     /// @param marketParams The market to redeem from.
     /// @param isYes The side to redeem, `true` for YES and `false` for NO.
     /// @param shares The amount of shares to burn.
+    /// @param onBehalf The address whose shares are burned.
     /// @param to The address that will receive the outcome tokens.
     /// @return assets The amount of outcome tokens sent to `to`.
-    function redeem(MarketParams calldata marketParams, bool isYes, uint256 shares, address to)
+    function redeem(MarketParams calldata marketParams, bool isYes, uint256 shares, address onBehalf, address to)
         external
         returns (uint256 assets);
+
+    /// @notice Returns whether `authorized` may spend `authorizer`'s shares (i.e. redeem on its behalf).
+    /// @param authorizer The address that owns the shares.
+    /// @param authorized The address whose authorization is queried.
+    /// @return Whether `authorized` is authorized to act on behalf of `authorizer`.
+    function isAuthorized(address authorizer, address authorized) external view returns (bool);
+
+    /// @notice Sets whether `authorized` may spend `msg.sender`'s shares (i.e. redeem on its behalf).
+    /// @param authorized The address to authorize or deauthorize.
+    /// @param newIsAuthorized The new authorization status.
+    function setAuthorization(address authorized, bool newIsAuthorized) external;
 }

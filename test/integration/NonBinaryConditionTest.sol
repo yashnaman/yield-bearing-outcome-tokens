@@ -61,7 +61,7 @@ contract NonBinaryConditionTest is BaseTest {
         // The revert rolled Bob's deposit back entirely (including the token pull), and Alice's {1} position is intact
         // and fully redeemable.
         vm.prank(ALICE);
-        uint256 got = vault.redeem(market3, true, aliceShares, ALICE);
+        uint256 got = vault.redeem(market3, true, aliceShares, ALICE, ALICE);
         assertEq(got, 100, "first side fully redeemable after the failed match");
         assertEq(
             ct.balanceOf(ALICE, _positionId(IERC20(address(collateral)), conditionId3, true)),

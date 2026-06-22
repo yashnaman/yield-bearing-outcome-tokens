@@ -124,7 +124,7 @@ abstract contract InvariantBaseTest is BaseTest {
         uint256 shares = bound(sharesSeed, 1, held);
 
         vm.prank(msg.sender);
-        vault.redeem(m, isYes, shares, msg.sender);
+        vault.redeem(m, isYes, shares, msg.sender, msg.sender);
     }
 
     /// @dev Accrues yield into the shared ERC4626 vault, lifting every honest adapter's invested balance. Capped in
@@ -209,7 +209,7 @@ abstract contract InvariantBaseTest is BaseTest {
                     uint256 held = vault.sharesOf(mid, isYes, actors[a]);
                     if (held == 0) continue;
                     vm.prank(actors[a]);
-                    vault.redeem(m, isYes, held, actors[a]);
+                    vault.redeem(m, isYes, held, actors[a], actors[a]);
                 }
             }
         }

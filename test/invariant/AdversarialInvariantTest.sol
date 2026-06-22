@@ -60,7 +60,7 @@ contract AdversarialInvariantTest is InvariantBaseTest {
         if (held == 0) return;
         uint256 shares = bound(sharesSeed, 1, held);
         vm.prank(msg.sender);
-        try vault.redeem(marketD, isYes, shares, msg.sender) {} catch {}
+        try vault.redeem(marketD, isYes, shares, msg.sender, msg.sender) {} catch {}
     }
 
     /// @dev Reconfigures the hostile adapter mid-run: lie about the balance, short-pay divest, or arm a reentrant
@@ -76,7 +76,7 @@ contract AdversarialInvariantTest is InvariantBaseTest {
         } else {
             // Arm a reentrant redeem of market D during the next divest.
             uint256 held = vault.sharesOf(_id(marketD), isYes, msg.sender);
-            bytes memory data = abi.encodeCall(vault.redeem, (marketD, isYes, held, msg.sender));
+            bytes memory data = abi.encodeCall(vault.redeem, (marketD, isYes, held, msg.sender, msg.sender));
             evil.setReentrancy(MaliciousVaultAdapter.ReenterOn.DIVEST, address(vault), data);
         }
     }

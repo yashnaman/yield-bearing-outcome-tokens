@@ -7,7 +7,13 @@ import {BaseTest} from "test/BaseTest.sol";
 /// events and reverts.
 contract RedeemIntegrationTest is BaseTest {
     event Redeem(
-        bytes32 indexed id, bool isYes, address indexed caller, address indexed to, uint256 shares, uint256 amount
+        bytes32 indexed id,
+        bool isYes,
+        address indexed caller,
+        address onBehalf,
+        address indexed to,
+        uint256 shares,
+        uint256 amount
     );
 
     /// @dev When the side still holds enough dangling tokens, redemption pays straight out without touching the adapter.
@@ -47,10 +53,10 @@ contract RedeemIntegrationTest is BaseTest {
         uint256 shares = _deposit(ALICE, true, 100);
 
         vm.expectEmit(true, true, true, true, address(vault));
-        emit Redeem(id, true, ALICE, RECEIVER, shares, 100);
+        emit Redeem(id, true, ALICE, ALICE, RECEIVER, shares, 100);
 
         vm.prank(ALICE);
-        uint256 assets = vault.redeem(marketParams, true, shares, RECEIVER);
+        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, RECEIVER);
 
         assertEq(assets, 100, "assets returned");
         assertEq(ct.balanceOf(RECEIVER, yesPositionId), 100, "tokens sent to `to`, not caller");
@@ -66,7 +72,7 @@ contract RedeemIntegrationTest is BaseTest {
 
         uint256 balBefore = ct.balanceOf(to, yesPositionId);
         vm.prank(ALICE);
-        uint256 assets = vault.redeem(marketParams, true, shares, to);
+        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, to);
 
         assertEq(assets, amount, "redeems the deposited amount");
         assertEq(ct.balanceOf(to, yesPositionId) - balBefore, amount, "outcome tokens delivered to receiver");
@@ -78,7 +84,7 @@ contract RedeemIntegrationTest is BaseTest {
 
         vm.prank(ALICE);
         vm.expectRevert();
-        vault.redeem(marketParams, true, shares + 1, ALICE);
+        vault.redeem(marketParams, true, shares + 1, ALICE, ALICE);
     }
 
     /// @dev A deposit immediately followed by a full redeem never returns more than was deposited (rounding favors the

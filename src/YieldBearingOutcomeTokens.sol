@@ -36,9 +36,16 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
     error TransferFailed();
     error ApproveFailed();
+    /// @notice Thrown when `msg.sender` is neither `onBehalf` nor authorized to act on its behalf.
+    error Unauthorized();
+    /// @notice Thrown when `setAuthorization` is called with the value already set.
+    error AlreadySet();
 
     /// @notice The per-side state (shares and dangling balance) of each market, keyed by market `id` then by `isYes`.
     mapping(bytes32 id => mapping(bool isYes => Side)) internal side;
+
+    /// @inheritdoc IYieldBearingOutcomeTokens
+    mapping(address authorizer => mapping(address authorized => bool)) public isAuthorized;
 
     /// @param conditionalTokens The ConditionalTokens contract backing every market this vault serves.
     constructor(IConditionalTokens conditionalTokens) {
@@ -139,10 +146,12 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens
-    function redeem(MarketParams calldata marketParams, bool isYes, uint256 shares, address to)
+    function redeem(MarketParams calldata marketParams, bool isYes, uint256 shares, address onBehalf, address to)
         external
         returns (uint256 assets)
     {
+        require(msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender], Unauthorized());
+
         bytes32 id = _id(marketParams);
 
         uint256 positionId = CTHelpers.getPositionId(
@@ -161,7 +170,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
             / (redeemSideTotalShares + VIRTUAL_SHARES);
 
         redeemSide.totalShares = redeemSideTotalShares - shares;
-        redeemSide.shares[msg.sender] -= shares;
+        redeemSide.shares[onBehalf] -= shares;
 
         if (dangling < assets) {
             uint256 amount = assets - dangling;
@@ -176,7 +185,16 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
         CONDITIONAL_TOKENS.safeTransferFrom(address(this), to, positionId, assets, "");
 
-        emit Redeem(id, isYes, msg.sender, to, shares, assets);
+        emit Redeem(id, isYes, msg.sender, onBehalf, to, shares, assets);
+    }
+
+    /// @inheritdoc IYieldBearingOutcomeTokens
+    function setAuthorization(address authorized, bool newIsAuthorized) external {
+        require(newIsAuthorized != isAuthorized[msg.sender][authorized], AlreadySet());
+
+        isAuthorized[msg.sender][authorized] = newIsAuthorized;
+
+        emit SetAuthorization(msg.sender, authorized, newIsAuthorized);
     }
 
     /// @dev Divests `amount` of collateral from the vault and splits it into an `amount`-sized YES/NO pair held by

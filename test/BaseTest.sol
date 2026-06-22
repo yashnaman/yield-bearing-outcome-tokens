@@ -159,7 +159,7 @@ contract BaseTest is Test {
 
     function _redeem(address user, bool isYes, uint256 shares) internal returns (uint256 assets) {
         vm.prank(user);
-        assets = vault.redeem(marketParams, isYes, shares, user);
+        assets = vault.redeem(marketParams, isYes, shares, user, user);
     }
 
     /// @dev Simulates yield by minting `amount` collateral straight into the ERC4626 vault, lifting its share price so

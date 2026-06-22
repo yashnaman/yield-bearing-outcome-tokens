@@ -82,7 +82,7 @@ contract RevertPathsTest is BaseTest {
 
         vm.prank(BOB);
         vm.expectRevert(ApproveFailed.selector);
-        vault.redeem(badMarket, false, bobShares, BOB);
+        vault.redeem(badMarket, false, bobShares, BOB, BOB);
     }
 
     /// @dev Directly exercises the `danglingBalance` getter: after an unmatched deposit it equals the deposited amount.
