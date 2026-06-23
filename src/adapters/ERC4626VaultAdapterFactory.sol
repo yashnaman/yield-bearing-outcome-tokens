@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.34;
 
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 import {IERC4626VaultAdapterFactory} from "src/interface/IERC4626VaultAdapterFactory.sol";

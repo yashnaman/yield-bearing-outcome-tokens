@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.34;
 
 /// @notice Minimal mintable ERC20 for tests.
 contract MockERC20 {

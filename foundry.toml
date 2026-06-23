@@ -2,6 +2,8 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+optimizer = true
+optimizer_runs = 4294967295 # max
 
 # Local profile: keep fuzz/invariant runs light so the suite is fast to iterate on.
 [profile.default.fuzz]

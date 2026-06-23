@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.34;
 
 import {IERC165} from "forge-std/interfaces/IERC165.sol";
 

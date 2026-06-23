@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.34;
 
 import {IConditionalTokens} from "src/interface/IConditionalTokens.sol";
 import {CTHelpers} from "src/libraries/CTHelpers.sol";

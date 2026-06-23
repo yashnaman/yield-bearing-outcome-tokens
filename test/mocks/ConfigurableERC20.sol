@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.34;
 
 /// @notice A MockERC20 whose `transfer`/`approve` can be made to return `false` for a specific caller, used to cover
 /// the vault's raw-bool failure paths (`TransferFailed` / `ApproveFailed`). Keying on `msg.sender` lets the same token
