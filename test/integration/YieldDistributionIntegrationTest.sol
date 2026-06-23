@@ -14,7 +14,7 @@ contract YieldDistributionIntegrationTest is BaseTest {
 
         _accrueYield(100); // double the vault's assets -> investedBalance = 200
 
-        assertEq(adapter.investedBalance(marketParams), 200, "yield reflected in invested balance");
+        assertEq(vault.investedBalance(defaultVault, conditionId), 200, "yield reflected in invested balance");
 
         // Bob's NO shares should now redeem for ~200 (his 100 doubled), minus virtual-offset rounding.
         uint256 assets = _redeem(BOB, false, bobShares);
@@ -27,7 +27,7 @@ contract YieldDistributionIntegrationTest is BaseTest {
         uint256 yesShares = _deposit(ALICE, true, 100);
         uint256 noShares = _deposit(BOB, false, 50); // matched = 50; YES has 50 dangling, NO has 0
 
-        assertEq(adapter.investedBalance(marketParams), 50, "50 complete sets invested");
+        assertEq(vault.investedBalance(defaultVault, conditionId), 50, "50 complete sets invested");
 
         _accrueYield(50); // investedBalance 50 -> 100
 

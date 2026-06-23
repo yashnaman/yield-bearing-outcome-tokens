@@ -3,9 +3,9 @@ pragma solidity ^0.8.34;
 
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
-/// @notice Minimal ERC4626-style vault sufficient for the ERC4626VaultAdapter.
-/// @dev Shares track 1:1 with deposited assets. Only the functions the adapter uses are implemented; cast its
-/// address to IERC4626 when wiring it up.
+/// @notice Minimal ERC4626-style vault sufficient for the YieldBearingOutcomeTokens core.
+/// @dev Shares track 1:1 with deposited assets. Only the functions the core uses are implemented; cast its address to
+/// IERC4626 when wiring it up.
 contract MockERC4626 {
     IERC20 public immutable asset_;
 

@@ -16,7 +16,7 @@ contract RedeemIntegrationTest is BaseTest {
         uint256 amount
     );
 
-    /// @dev When the side still holds enough dangling tokens, redemption pays straight out without touching the adapter.
+    /// @dev When the side still holds enough dangling tokens, redemption pays straight out without touching the vault.
     function testRedeemFromDangling(uint256 amount) public {
         amount = bound(amount, MIN_TEST_AMOUNT, MAX_TEST_AMOUNT);
 
@@ -25,7 +25,7 @@ contract RedeemIntegrationTest is BaseTest {
         uint256 assets = _redeem(ALICE, true, shares);
 
         assertEq(assets, amount, "redeems exactly what was deposited");
-        assertEq(adapter.investedBalance(marketParams), 0, "adapter untouched");
+        assertEq(vault.investedBalance(defaultVault, conditionId), 0, "vault untouched");
         assertEq(ct.balanceOf(ALICE, yesPositionId), amount, "outcome tokens returned to user");
         assertEq(vault.sharesOf(id, true, ALICE), 0, "shares burned");
     }
@@ -46,7 +46,7 @@ contract RedeemIntegrationTest is BaseTest {
         assertEq(ct.balanceOf(BOB, noPositionId), amount, "NO tokens delivered");
         // Splitting produced `amount` YES too, credited to the YES side as dangling.
         assertEq(_vaultPositionBalance(yesPositionId), amount, "opposite side credited the split YES tokens");
-        assertEq(adapter.investedBalance(marketParams), 0, "collateral fully divested");
+        assertEq(vault.investedBalance(defaultVault, conditionId), 0, "collateral fully divested");
     }
 
     function testRedeemEmitsEvent() public {
@@ -56,7 +56,7 @@ contract RedeemIntegrationTest is BaseTest {
         emit Redeem(id, true, ALICE, ALICE, RECEIVER, shares, 100);
 
         vm.prank(ALICE);
-        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, RECEIVER);
+        uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, RECEIVER);
 
         assertEq(assets, 100, "assets returned");
         assertEq(ct.balanceOf(RECEIVER, yesPositionId), 100, "tokens sent to `to`, not caller");
@@ -72,7 +72,7 @@ contract RedeemIntegrationTest is BaseTest {
 
         uint256 balBefore = ct.balanceOf(to, yesPositionId);
         vm.prank(ALICE);
-        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, to);
+        uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, to);
 
         assertEq(assets, amount, "redeems the deposited amount");
         assertEq(ct.balanceOf(to, yesPositionId) - balBefore, amount, "outcome tokens delivered to receiver");
@@ -84,7 +84,7 @@ contract RedeemIntegrationTest is BaseTest {
 
         vm.prank(ALICE);
         vm.expectRevert();
-        vault.redeem(marketParams, true, shares + 1, ALICE, ALICE);
+        vault.redeem(defaultVault, conditionId, true, shares + 1, ALICE, ALICE);
     }
 
     /// @dev A deposit immediately followed by a full redeem never returns more than was deposited (rounding favors the

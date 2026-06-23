@@ -3,7 +3,7 @@ pragma solidity ^0.8.34;
 
 import {InvariantBaseTest} from "test/invariant/InvariantBaseTest.sol";
 
-/// @notice Honest-adapter invariants. Only the bounded handlers are targeted, and `fail_on_revert = true` means this
+/// @notice Honest-vault invariants. Only the bounded handlers are targeted, and `fail_on_revert = true` means this
 /// suite also proves liveness: no well-formed deposit/redeem ever reverts.
 contract InvariantTest is InvariantBaseTest {
     function setUp() public override {
@@ -29,9 +29,9 @@ contract InvariantTest is InvariantBaseTest {
         assertPoolConservation();
     }
 
-    /// @dev Adapters never claim more collateral than the underlying ERC4626 holds.
-    function invariant_adapterSolvency() public view {
-        assertAdapterSolvency();
+    /// @dev Markets never claim more collateral than their underlying ERC4626 vault holds.
+    function invariant_vaultSolvency() public view {
+        assertVaultSolvency();
     }
 
     /// @dev Every holder can always exit: redeeming all shares across every market and side succeeds simultaneously.

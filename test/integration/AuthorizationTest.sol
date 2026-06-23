@@ -15,7 +15,7 @@ contract AuthorizationTest is BaseTest {
         uint256 shares = _deposit(ALICE, true, amount);
 
         vm.prank(ALICE);
-        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, ALICE);
+        uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, ALICE);
 
         assertEq(assets, amount, "owner redeems own shares");
         assertEq(vault.sharesOf(id, true, ALICE), 0, "shares burned");
@@ -27,7 +27,7 @@ contract AuthorizationTest is BaseTest {
 
         vm.prank(BOB);
         vm.expectRevert(YieldBearingOutcomeTokens.Unauthorized.selector);
-        vault.redeem(marketParams, true, shares, ALICE, BOB);
+        vault.redeem(defaultVault, conditionId, true, shares, ALICE, BOB);
 
         assertEq(vault.sharesOf(id, true, ALICE), shares, "Alice's shares untouched");
     }
@@ -43,7 +43,7 @@ contract AuthorizationTest is BaseTest {
 
         // Bob redeems Alice's shares; tokens are delivered to RECEIVER.
         vm.prank(BOB);
-        uint256 assets = vault.redeem(marketParams, true, shares, ALICE, RECEIVER);
+        uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, RECEIVER);
 
         assertEq(assets, amount, "authorized party redeems on behalf");
         assertEq(vault.sharesOf(id, true, ALICE), 0, "Alice's shares burned, not Bob's");
@@ -62,7 +62,7 @@ contract AuthorizationTest is BaseTest {
 
         vm.prank(BOB);
         vm.expectRevert(YieldBearingOutcomeTokens.Unauthorized.selector);
-        vault.redeem(marketParams, true, shares, ALICE, BOB);
+        vault.redeem(defaultVault, conditionId, true, shares, ALICE, BOB);
     }
 
     /// @dev Authorization is directional and per-authorizer: Bob authorizing Carol does not let Carol spend Alice's
@@ -76,14 +76,14 @@ contract AuthorizationTest is BaseTest {
         vault.setAuthorization(CAROL, true);
         vm.prank(CAROL);
         vm.expectRevert(YieldBearingOutcomeTokens.Unauthorized.selector);
-        vault.redeem(marketParams, true, aliceShares, ALICE, CAROL);
+        vault.redeem(defaultVault, conditionId, true, aliceShares, ALICE, CAROL);
 
         // Alice authorizing Bob grants Bob nothing over his own grant direction: Alice still can't spend Bob's shares.
         vm.prank(ALICE);
         vault.setAuthorization(BOB, true);
         vm.prank(ALICE);
         vm.expectRevert(YieldBearingOutcomeTokens.Unauthorized.selector);
-        vault.redeem(marketParams, true, 100, BOB, ALICE);
+        vault.redeem(defaultVault, conditionId, true, 100, BOB, ALICE);
     }
 
     /// @dev `setAuthorization` emits with the authorizer (msg.sender), the authorized address and the new status.

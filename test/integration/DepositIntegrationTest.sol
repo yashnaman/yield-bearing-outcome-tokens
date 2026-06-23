@@ -20,7 +20,7 @@ contract DepositIntegrationTest is BaseTest {
         assertEq(vault.totalShares(id, true), shares, "totalShares updated");
         assertEq(vault.sharesOf(id, true, ALICE), shares, "user shares credited");
         // No opposite side yet, so nothing merges; the deposit stays dangling and the vault holds the tokens.
-        assertEq(adapter.investedBalance(marketParams), 0, "nothing invested without a match");
+        assertEq(vault.investedBalance(defaultVault, conditionId), 0, "nothing invested without a match");
         assertEq(_vaultPositionBalance(yesPositionId), amount, "vault holds the dangling YES tokens");
     }
 
@@ -34,7 +34,7 @@ contract DepositIntegrationTest is BaseTest {
 
         uint256 matched = yesAmount < noAmount ? yesAmount : noAmount;
 
-        assertEq(adapter.investedBalance(marketParams), matched, "complete sets invested");
+        assertEq(vault.investedBalance(defaultVault, conditionId), matched, "complete sets invested");
         // Each side keeps only its surplus over the match as dangling tokens.
         assertEq(_vaultPositionBalance(yesPositionId), yesAmount - matched, "YES surplus dangling");
         assertEq(_vaultPositionBalance(noPositionId), noAmount - matched, "NO surplus dangling");
@@ -58,7 +58,7 @@ contract DepositIntegrationTest is BaseTest {
 
         _mintOutcomeTokens(ALICE, amount);
         vm.prank(ALICE);
-        uint256 shares = vault.deposit(marketParams, true, amount, to);
+        uint256 shares = vault.deposit(defaultVault, conditionId, true, amount, to);
 
         assertEq(vault.sharesOf(id, true, to), shares, "shares credited to receiver");
         if (to != ALICE) {
@@ -74,7 +74,7 @@ contract DepositIntegrationTest is BaseTest {
         emit Deposit(id, true, ALICE, BOB, 100, expectedShares);
 
         vm.prank(ALICE);
-        vault.deposit(marketParams, true, 100, BOB);
+        vault.deposit(defaultVault, conditionId, true, 100, BOB);
 
         assertEq(vault.sharesOf(id, true, BOB), expectedShares, "shares minted to `to`, not caller");
     }
@@ -90,7 +90,7 @@ contract DepositIntegrationTest is BaseTest {
         collateral.approve(address(ct), 100);
         ct.splitPosition(IERC20(address(collateral)), PARENT_COLLECTION_ID, conditionId, partition, 100);
         vm.expectRevert();
-        vault.deposit(marketParams, true, 100, ALICE);
+        vault.deposit(defaultVault, conditionId, true, 100, ALICE);
         vm.stopPrank();
     }
 

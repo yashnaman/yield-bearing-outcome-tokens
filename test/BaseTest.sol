@@ -7,13 +7,9 @@ import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 
 import {YieldBearingOutcomeTokens} from "src/YieldBearingOutcomeTokens.sol";
 import {IConditionalTokens} from "src/interface/IConditionalTokens.sol";
-import {IVaultAdapter} from "src/interface/IVaultAdapter.sol";
-import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeTokens.sol";
 
 import {MockERC20} from "test/mocks/MockERC20.sol";
 import {MockERC4626} from "test/mocks/MockERC4626.sol";
-import {ERC4626VaultAdapter} from "src/adapters/ERC4626VaultAdapter.sol";
-import {ERC4626VaultAdapterFactory} from "src/adapters/ERC4626VaultAdapterFactory.sol";
 
 /// @dev The subset of the real Gnosis ConditionalTokens surface the tests drive directly. The vault only depends on
 /// `IConditionalTokens`; this extends it with the condition-setup and id-derivation helpers used to build fixtures.
@@ -40,9 +36,16 @@ interface IConditionalTokensExt is IConditionalTokens {
 
 /// @title BaseTest
 /// @notice Shared fixture for the YieldBearingOutcomeTokens suite. Deploys the real ConditionalTokens via
-/// `vm.deployCode` (CTHelpers is out of scope and assumed correct), a mock ERC20 collateral, a mock ERC4626 vault and
-/// the example ERC4626 adapter, then wires a single default binary market. Modeled on morpho-blue's BaseTest.
+/// `vm.deployCode` (CTHelpers is out of scope and assumed correct), a mock ERC20 collateral and a mock ERC4626 vault,
+/// then wires a single default binary market over that vault. Modeled on morpho-blue's BaseTest.
 contract BaseTest is Test {
+    /// @dev Test-only bundle of the two values that identify a market, for suites that juggle several markets. The
+    /// production contract takes these as flat `(vault, conditionId)` arguments and has no such struct.
+    struct Market {
+        IERC4626 vault;
+        bytes32 conditionId;
+    }
+
     bytes32 internal constant PARENT_COLLECTION_ID = bytes32(0);
     uint256 internal constant VIRTUAL_SHARES = 1e6;
     uint256 internal constant VIRTUAL_ASSETS = 1;
@@ -60,18 +63,16 @@ contract BaseTest is Test {
     address internal BOB;
     address internal CAROL;
     address internal RECEIVER;
-    address internal ORACLE; // the condition's reporter (unrelated to the vault adapter)
+    address internal ORACLE; // the condition's reporter (unrelated to the vault)
 
     IConditionalTokensExt internal ct;
     MockERC20 internal collateral;
     MockERC4626 internal erc4626;
-    ERC4626VaultAdapter internal adapter;
-    ERC4626VaultAdapterFactory internal factory;
     YieldBearingOutcomeTokens internal vault;
 
     bytes32 internal questionId;
     bytes32 internal conditionId;
-    IYieldBearingOutcomeTokens.MarketParams internal marketParams;
+    IERC4626 internal defaultVault; // the default market's ERC-4626 vault (== erc4626, typed as IERC4626)
     bytes32 internal id;
 
     uint256 internal yesPositionId;
@@ -96,22 +97,13 @@ contract BaseTest is Test {
         vault = new YieldBearingOutcomeTokens(ct);
         vm.label(address(vault), "Vault");
 
-        factory = new ERC4626VaultAdapterFactory(address(vault));
-        vm.label(address(factory), "AdapterFactory");
-
-        adapter = factory.deployAdapter(IERC4626(address(erc4626)));
-        vm.label(address(adapter), "Adapter");
+        defaultVault = IERC4626(address(erc4626));
 
         questionId = keccak256("question");
         ct.prepareCondition(ORACLE, questionId, 2);
         conditionId = ct.getConditionId(ORACLE, questionId, 2);
 
-        marketParams = IYieldBearingOutcomeTokens.MarketParams({
-            collateralToken: IERC20(address(collateral)),
-            conditionId: conditionId,
-            vaultAdapter: IVaultAdapter(address(adapter))
-        });
-        id = _id(marketParams);
+        id = _id(defaultVault, conditionId);
 
         yesPositionId = _positionId(true);
         noPositionId = _positionId(false);
@@ -119,8 +111,12 @@ contract BaseTest is Test {
 
     /* ID HELPERS */
 
-    function _id(IYieldBearingOutcomeTokens.MarketParams memory p) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(address(p.collateralToken), p.conditionId, address(p.vaultAdapter)));
+    function _id(IERC4626 vault_, bytes32 conditionId_) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(address(vault_), conditionId_));
+    }
+
+    function _id(Market memory m) internal pure returns (bytes32) {
+        return _id(m.vault, m.conditionId);
     }
 
     /// @dev Position id of a side of the default market, derived through the deployed ConditionalTokens itself.
@@ -159,16 +155,16 @@ contract BaseTest is Test {
     function _deposit(address user, bool isYes, uint256 amount) internal returns (uint256 shares) {
         _mintOutcomeTokens(user, amount);
         vm.prank(user);
-        shares = vault.deposit(marketParams, isYes, amount, user);
+        shares = vault.deposit(defaultVault, conditionId, isYes, amount, user);
     }
 
     function _redeem(address user, bool isYes, uint256 shares) internal returns (uint256 assets) {
         vm.prank(user);
-        assets = vault.redeem(marketParams, isYes, shares, user, user);
+        assets = vault.redeem(defaultVault, conditionId, isYes, shares, user, user);
     }
 
     /// @dev Simulates yield by minting `amount` collateral straight into the ERC4626 vault, lifting its share price so
-    /// `adapter.investedBalance` grows for every market invested through it.
+    /// the invested balance grows for every market invested into it.
     function _accrueYield(uint256 amount) internal {
         collateral.mint(address(erc4626), amount);
     }

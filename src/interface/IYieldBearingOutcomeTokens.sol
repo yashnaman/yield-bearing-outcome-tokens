@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.34;
 
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
-import {IVaultAdapter} from "src/interface/IVaultAdapter.sol";
+import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 
 /// @title IYieldBearingOutcomeTokens
 /// @author yashnaman
-/// @notice Interface for the YieldBearingOutcomeTokens vault, exposing its market type and events.
+/// @notice Interface for the YieldBearingOutcomeTokens vault, exposing its market identity and events.
+/// @dev A market is identified by the pair (`yieldVault`, `conditionId`): the ERC-4626 vault that the merged collateral
+/// is invested into, and the ConditionalTokens condition id of the binary market. Its `id` is the hash of the two. The
+/// market's collateral is always the yield vault's underlying `asset()`.
 interface IYieldBearingOutcomeTokens {
     /// @notice Emitted on a deposit into the `isYes` side of market `id`.
     /// @param id The market the deposit was made to.
@@ -43,18 +45,6 @@ interface IYieldBearingOutcomeTokens {
     /// @param newIsAuthorized The new authorization status.
     event SetAuthorization(address indexed authorizer, address indexed authorized, bool newIsAuthorized);
 
-    /// @notice The parameters that define a market served by the vault.
-    /// @dev The market id is the hash of (`collateralToken`, `conditionId`, `vaultAdapter`).
-    struct MarketParams {
-        /// @dev The market's collateral ERC-20, also the asset a complete set of outcome tokens merges into.
-        IERC20 collateralToken;
-        /// @dev The ConditionalTokens condition id of the binary market.
-        bytes32 conditionId;
-        /// @dev The adapter that invests merged collateral into a vault and divests it on demand. It may switch the
-        /// underlying vault or charge fees; the vault does not depend on either.
-        IVaultAdapter vaultAdapter;
-    }
-
     /// @dev Holds the per-side state (shares and dangling balance) for one side (YES or NO) of one market.
     struct Side {
         uint256 totalShares;
@@ -65,13 +55,13 @@ interface IYieldBearingOutcomeTokens {
     }
 
     /// @notice Returns the total shares minted against the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
+    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @return The total shares minted on that side.
     function totalShares(bytes32 marketId, bool outcome) external view returns (uint256);
 
     /// @notice Returns the shares held by `user` on the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
+    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @param user The address whose shares are queried.
     /// @return The shares held by `user` on that side.
@@ -80,35 +70,45 @@ interface IYieldBearingOutcomeTokens {
     /// @notice Returns the dangling outcome-token balance the vault holds for the `outcome` side of market `marketId`:
     /// tokens received but not yet merged into collateral. Tracked internally per market so a market's balance is
     /// isolated from others sharing the same ConditionalTokens position id.
-    /// @param marketId The id of the market, the hash of its (`collateralToken`, `conditionId`, `vaultAdapter`).
+    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @return The dangling outcome-token balance held on that side.
     function danglingBalance(bytes32 marketId, bool outcome) external view returns (uint256);
 
-    /// @notice Deposits `assets` outcome tokens of the `isYes` side of `marketParams` and mints shares to `to`.
+    /// @notice Returns the collateral currently recoverable for the (`yieldVault`, `conditionId`) market if its
+    /// invested position were withdrawn now, denominated in outcome-token (== collateral) decimals.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into.
+    /// @param conditionId The ConditionalTokens condition id of the market.
+    /// @return The market's invested balance in collateral terms.
+    function investedBalance(IERC4626 yieldVault, bytes32 conditionId) external view returns (uint256);
+
+    /// @notice Deposits `assets` outcome tokens of the `isYes` side of the (`yieldVault`, `conditionId`) market and
+    /// mints shares to `to`.
     /// @dev Pulls the outcome tokens from `msg.sender`, then rebalances the market: any complete sets the deposit
-    /// enables are merged into collateral and invested.
-    /// @param marketParams The market to deposit into.
+    /// enables are merged into collateral and deposited into the yield vault.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into; its `asset()` is the collateral.
+    /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param isYes The side to deposit, `true` for YES and `false` for NO.
     /// @param assets The amount of outcome tokens to deposit.
     /// @param to The address that will own the minted shares.
     /// @return shares The amount of shares minted.
-    function deposit(MarketParams calldata marketParams, bool isYes, uint256 assets, address to)
+    function deposit(IERC4626 yieldVault, bytes32 conditionId, bool isYes, uint256 assets, address to)
         external
         returns (uint256 shares);
 
-    /// @notice Burns `shares` of the `isYes` side of `marketParams` from `onBehalf` and sends the redeemed outcome
-    /// tokens to `to`.
-    /// @dev Pays out of the dangling outcome tokens first, and only divests collateral through the adapter to split
+    /// @notice Burns `shares` of the `isYes` side of the (`yieldVault`, `conditionId`) market from `onBehalf` and sends
+    /// the redeemed outcome tokens to `to`.
+    /// @dev Pays out of the dangling outcome tokens first, and only withdraws collateral from the yield vault to split
     /// into a fresh pair when the dangling balance is insufficient. `msg.sender` must be `onBehalf` itself or an
     /// address it has authorized via `setAuthorization`.
-    /// @param marketParams The market to redeem from.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into; its `asset()` is the collateral.
+    /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param isYes The side to redeem, `true` for YES and `false` for NO.
     /// @param shares The amount of shares to burn.
     /// @param onBehalf The address whose shares are burned.
     /// @param to The address that will receive the outcome tokens.
     /// @return assets The amount of outcome tokens sent to `to`.
-    function redeem(MarketParams calldata marketParams, bool isYes, uint256 shares, address onBehalf, address to)
+    function redeem(IERC4626 yieldVault, bytes32 conditionId, bool isYes, uint256 shares, address onBehalf, address to)
         external
         returns (uint256 assets);
 

@@ -4,34 +4,31 @@ pragma solidity ^0.8.34;
 import {BaseTest} from "test/BaseTest.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
-import {IVaultAdapter} from "src/interface/IVaultAdapter.sol";
-import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeTokens.sol";
-import {ERC4626VaultAdapter} from "src/adapters/ERC4626VaultAdapter.sol";
-import {ERC4626VaultAdapterFactory} from "src/adapters/ERC4626VaultAdapterFactory.sol";
+import {MockERC4626} from "test/mocks/MockERC4626.sol";
 
 /// @title InvariantBaseTest
 /// @notice Shared harness for the invariant suites, in the style of morpho-blue's BaseInvariantTest: handler methods
-/// that bound their inputs and guard preconditions so that, under honest adapters, no call ever reverts (the suites
-/// run with `fail_on_revert = true`, so a guarded valid op reverting is itself a finding).
+/// that bound their inputs and guard preconditions so that, under honest vaults, no call ever reverts (the suites run
+/// with `fail_on_revert = true`, so a guarded valid op reverting is itself a finding).
 ///
 /// The market topology is chosen to stress cross-market isolation: markets A and B share one collateral+condition (so
-/// they share a ConditionalTokens position-id pool) but use two distinct honest adapters; market C is on a second
-/// condition. Isolation is enforced only by the vault's internal per-market `danglingBalance`.
+/// they share a ConditionalTokens position-id pool) but invest into two distinct honest vaults; market C is on a second
+/// condition. Isolation is enforced only by the core's internal per-market `danglingBalance`.
 abstract contract InvariantBaseTest is BaseTest {
-    ERC4626VaultAdapter internal adapterB;
+    MockERC4626 internal erc4626B;
 
     bytes32 internal conditionId2;
     bytes32 internal questionId2;
 
-    IYieldBearingOutcomeTokens.MarketParams internal marketA; // == default marketParams (adapter A, condition 1)
-    IYieldBearingOutcomeTokens.MarketParams internal marketB; // adapter B, condition 1 (shares A's pool)
-    IYieldBearingOutcomeTokens.MarketParams internal marketC; // adapter A, condition 2 (separate pool)
+    Market internal marketA; // default vault, condition 1
+    Market internal marketB; // vault B, condition 1 (shares A's pool)
+    Market internal marketC; // default vault, condition 2 (separate pool)
 
-    IYieldBearingOutcomeTokens.MarketParams[] internal markets;
+    Market[] internal markets;
 
     address[] internal actors;
 
-    /// @dev Ghost: outcome tokens donated straight to the vault (never deposited), keyed by position id. The vault
+    /// @dev Ghost: outcome tokens donated straight to the vault (never deposited), keyed by position id. The core
     /// prices off internal accounting, not its raw balance, so donations must inflate the pool by exactly this much
     /// and nothing more.
     mapping(uint256 positionId => uint256 amount) internal donated;
@@ -39,38 +36,30 @@ abstract contract InvariantBaseTest is BaseTest {
     function setUp() public virtual override {
         super.setUp();
 
-        // A second honest adapter over the SAME ERC4626 vault, so markets A and B share collateral+condition but not
-        // their adapter. Each factory salts on the vault address alone, so a single factory deploys at most one adapter
-        // per vault; a second factory (a distinct CREATE2 deployer) is used to deploy adapterB at a different address.
-        ERC4626VaultAdapterFactory factoryB = new ERC4626VaultAdapterFactory(address(vault));
-        adapterB = factoryB.deployAdapter(IERC4626(address(erc4626)));
-        vm.label(address(adapterB), "AdapterB");
+        // A second honest ERC-4626 vault over the SAME collateral, so markets A and B share collateral+condition (and
+        // thus a position-id pool) but invest into different vaults, mapping to distinct market ids.
+        erc4626B = new MockERC4626(IERC20(address(collateral)));
+        vm.label(address(erc4626B), "ERC4626_B");
 
-        // Seed the underlying ERC4626 with a large 1:1 position held by this harness and never withdrawn. This keeps
-        // its share price ~1 across a long run, so honest `invest` calls never round to zero shares (no stranding) and
-        // the gradually-accruing yield can't compound the price to an overflow. A real yield vault is similarly deep
+        // Seed each vault with a large 1:1 position held by this harness and never withdrawn. This keeps each vault's
+        // share price ~1 across a long run, so honest deposits never round to zero shares (no stranding) and the
+        // gradually-accruing yield can't compound the price to an overflow. A real yield vault is similarly deep
         // relative to a single market's deposits.
         uint256 seed = 1e30;
-        collateral.mint(address(this), seed);
+        collateral.mint(address(this), 2 * seed);
         collateral.approve(address(erc4626), seed);
         erc4626.deposit(seed, address(this));
+        collateral.approve(address(erc4626B), seed);
+        erc4626B.deposit(seed, address(this));
 
         // A second binary condition for a market on a separate position-id pool.
         questionId2 = keccak256("question2");
         ct.prepareCondition(ORACLE, questionId2, 2);
         conditionId2 = ct.getConditionId(ORACLE, questionId2, 2);
 
-        marketA = marketParams;
-        marketB = IYieldBearingOutcomeTokens.MarketParams({
-            collateralToken: IERC20(address(collateral)),
-            conditionId: conditionId,
-            vaultAdapter: IVaultAdapter(address(adapterB))
-        });
-        marketC = IYieldBearingOutcomeTokens.MarketParams({
-            collateralToken: IERC20(address(collateral)),
-            conditionId: conditionId2,
-            vaultAdapter: IVaultAdapter(address(adapter))
-        });
+        marketA = Market({vault: defaultVault, conditionId: conditionId});
+        marketB = Market({vault: IERC4626(address(erc4626B)), conditionId: conditionId});
+        marketC = Market({vault: defaultVault, conditionId: conditionId2});
 
         markets.push(marketA);
         markets.push(marketB);
@@ -87,15 +76,13 @@ abstract contract InvariantBaseTest is BaseTest {
 
     /* HELPERS */
 
-    function _market(uint256 seed) internal view returns (IYieldBearingOutcomeTokens.MarketParams memory) {
+    function _market(uint256 seed) internal view returns (Market memory) {
         return markets[seed % markets.length];
     }
 
     /// @dev Mints `amount` of the `isYes` side of `m` to `user` (by splitting fresh collateral at the CT) and approves
     /// the vault as ERC1155 operator. Pure setup; never reverts for honest collateral.
-    function _giveOutcomeTokens(address user, IYieldBearingOutcomeTokens.MarketParams memory m, uint256 amount)
-        internal
-    {
+    function _giveOutcomeTokens(address user, Market memory m, uint256 amount) internal {
         collateral.mint(user, amount);
         uint256[] memory partition = new uint256[](2);
         partition[0] = 1;
@@ -107,19 +94,19 @@ abstract contract InvariantBaseTest is BaseTest {
         vm.stopPrank();
     }
 
-    /* HONEST HANDLERS (must never revert under honest adapters) */
+    /* HONEST HANDLERS (must never revert under honest vaults) */
 
     function depositHandler(uint256 marketSeed, bool isYes, uint256 amount) external {
-        IYieldBearingOutcomeTokens.MarketParams memory m = _market(marketSeed);
+        Market memory m = _market(marketSeed);
         amount = bound(amount, MIN_INVARIANT_AMOUNT, MAX_INVARIANT_AMOUNT);
 
         _giveOutcomeTokens(msg.sender, m, amount);
         vm.prank(msg.sender);
-        vault.deposit(m, isYes, amount, msg.sender);
+        vault.deposit(m.vault, m.conditionId, isYes, amount, msg.sender);
     }
 
     function redeemHandler(uint256 marketSeed, bool isYes, uint256 sharesSeed) external {
-        IYieldBearingOutcomeTokens.MarketParams memory m = _market(marketSeed);
+        Market memory m = _market(marketSeed);
         bytes32 mid = _id(m);
 
         uint256 held = vault.sharesOf(mid, isYes, msg.sender);
@@ -127,23 +114,25 @@ abstract contract InvariantBaseTest is BaseTest {
         uint256 shares = bound(sharesSeed, 1, held);
 
         vm.prank(msg.sender);
-        vault.redeem(m, isYes, shares, msg.sender, msg.sender);
+        vault.redeem(m.vault, m.conditionId, isYes, shares, msg.sender, msg.sender);
     }
 
-    /// @dev Accrues yield into the shared ERC4626 vault, lifting every honest adapter's invested balance. Capped in
-    /// absolute terms per step: combined with the large 1:1 seed in `setUp`, this keeps the underlying share price near
-    /// 1 over a long run, so it grows gradually without compounding toward an overflow.
+    /// @dev Accrues yield into one of the shared ERC-4626 vaults, lifting that vault's invested balances. Capped in
+    /// absolute terms per step: combined with the large 1:1 seed in `setUp`, this keeps each vault's share price near 1
+    /// over a long run, so it grows gradually without compounding toward an overflow.
     function accrueYieldHandler(uint256 amount) external {
         amount = bound(amount, 0, MAX_INVARIANT_AMOUNT);
         if (amount == 0) return;
-        collateral.mint(address(erc4626), amount);
+        // Alternate which vault receives the yield so both A/C and B accrue over a run.
+        if (amount % 2 == 0) collateral.mint(address(erc4626), amount);
+        else collateral.mint(address(erc4626B), amount);
     }
 
-    /// @dev Pushes outcome tokens straight onto the vault without going through `deposit`. The vault ignores raw
+    /// @dev Pushes outcome tokens straight onto the vault without going through `deposit`. The core ignores raw
     /// balances, so this must never move a share price or let anyone redeem the donated tokens; it should only show up
     /// as the `donated` ghost in pool conservation.
     function donateHandler(uint256 marketSeed, bool isYes, uint256 amount) external {
-        IYieldBearingOutcomeTokens.MarketParams memory m = _market(marketSeed);
+        Market memory m = _market(marketSeed);
         amount = bound(amount, MIN_INVARIANT_AMOUNT, MAX_INVARIANT_AMOUNT);
 
         _giveOutcomeTokens(msg.sender, m, amount); // mints `amount` of both sides to the sender
@@ -184,10 +173,7 @@ abstract contract InvariantBaseTest is BaseTest {
         _assertPool(conditionId2, false, _one(marketC));
     }
 
-    function _assertPool(bytes32 cond, bool isYes, IYieldBearingOutcomeTokens.MarketParams[] memory sharing)
-        internal
-        view
-    {
+    function _assertPool(bytes32 cond, bool isYes, Market[] memory sharing) internal view {
         uint256 positionId = _positionId(IERC20(address(collateral)), cond, isYes);
         uint256 sumDangling;
         for (uint256 i; i < sharing.length; ++i) {
@@ -204,7 +190,7 @@ abstract contract InvariantBaseTest is BaseTest {
     function assertAllHoldersCanRedeem() internal {
         uint256 snap = vm.snapshotState();
         for (uint256 i; i < markets.length; ++i) {
-            IYieldBearingOutcomeTokens.MarketParams memory m = markets[i];
+            Market memory m = markets[i];
             bytes32 mid = _id(m);
             for (uint256 s; s < 2; ++s) {
                 bool isYes = s == 0;
@@ -212,36 +198,31 @@ abstract contract InvariantBaseTest is BaseTest {
                     uint256 held = vault.sharesOf(mid, isYes, actors[a]);
                     if (held == 0) continue;
                     vm.prank(actors[a]);
-                    vault.redeem(m, isYes, held, actors[a], actors[a]);
+                    vault.redeem(m.vault, m.conditionId, isYes, held, actors[a], actors[a]);
                 }
             }
         }
         vm.revertToState(snap);
     }
 
-    /// @dev Asserts the honest adapters never collectively claim more invested collateral than the underlying ERC4626
-    /// actually holds.
-    function assertAdapterSolvency() internal view {
-        uint256 claimed =
-            adapter.investedBalance(marketA) + adapterB.investedBalance(marketB) + adapter.investedBalance(marketC);
-        assertLe(claimed, erc4626.totalAssets(), "adapters cannot claim more than the vault holds");
+    /// @dev Asserts the honest markets never collectively claim more invested collateral than the underlying vault
+    /// actually holds. Markets A and C share the default vault; market B uses vault B.
+    function assertVaultSolvency() internal view {
+        uint256 claimedDefault = vault.investedBalance(marketA.vault, marketA.conditionId)
+            + vault.investedBalance(marketC.vault, marketC.conditionId);
+        assertLe(claimedDefault, erc4626.totalAssets(), "default vault: markets cannot claim more than it holds");
+
+        uint256 claimedB = vault.investedBalance(marketB.vault, marketB.conditionId);
+        assertLe(claimedB, erc4626B.totalAssets(), "vault B: market cannot claim more than it holds");
     }
 
-    function _one(IYieldBearingOutcomeTokens.MarketParams memory a)
-        internal
-        pure
-        returns (IYieldBearingOutcomeTokens.MarketParams[] memory arr)
-    {
-        arr = new IYieldBearingOutcomeTokens.MarketParams[](1);
+    function _one(Market memory a) internal pure returns (Market[] memory arr) {
+        arr = new Market[](1);
         arr[0] = a;
     }
 
-    function _two(IYieldBearingOutcomeTokens.MarketParams memory a, IYieldBearingOutcomeTokens.MarketParams memory b)
-        internal
-        pure
-        returns (IYieldBearingOutcomeTokens.MarketParams[] memory arr)
-    {
-        arr = new IYieldBearingOutcomeTokens.MarketParams[](2);
+    function _two(Market memory a, Market memory b) internal pure returns (Market[] memory arr) {
+        arr = new Market[](2);
         arr[0] = a;
         arr[1] = b;
     }
