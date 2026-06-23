@@ -13,3 +13,7 @@ The `src/interface` directory holds the contract interfaces. [`IYieldBearingOutc
 The `src/libraries` directory contains [`CTHelpers.sol`](src/libraries/CTHelpers.sol), the helper used to derive ConditionalTokens collection and position ids.
 
 The `test` directory contains the test suite, including `test/mocks` with contracts designed exclusively for testing such as a mock ERC-4626 vault.
+
+## License
+
+Files in this repository are publicly available under license GPL-2.0-or-later, see [LICENSE](LICENSE).
