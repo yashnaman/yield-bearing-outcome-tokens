@@ -133,6 +133,11 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // ConditionalTokens either, so we inherit that limitation here.
         require(collateralToken.approve(address(yieldVault), completeSets), ApproveFailed());
 
+        // ACCEPTED RISK: a 1-wei opposite deposit forces a 1-wei merge, and if the vault rounds `deposit(1)` to 0
+        // shares the collateral reaches the vault but `vaultSharesOf[id]` does not grow, leaking 1 wei of backing to the
+        // vault's other depositors. Bounded to ~1 wei per attack and self-harming (the attacker holds losing market shares too
+        // and pays gas), so it is uneconomical. If underlying vault has virtual shares calculation with high decimals offset, 
+        // the attack impact reduces even further.
         vaultSharesOf[id] += yieldVault.deposit(completeSets, address(this));
     }
 
