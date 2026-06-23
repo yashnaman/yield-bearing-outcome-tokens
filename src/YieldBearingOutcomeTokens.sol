@@ -240,7 +240,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// pre-computed `id` so callers that already have it skip recomputing the hash. Only the shares booked to this
     /// market are converted, so other markets' funds are never reported here.
     function _investedBalance(IERC4626 yieldVault, bytes32 id) internal view returns (uint256) {
-        return yieldVault.convertToAssets(vaultSharesOf[id]);
+        return yieldVault.previewRedeem(vaultSharesOf[id]);
     }
 
     /// @dev Returns the market `id`, the hash of (`yieldVault`, `conditionId`) that uniquely identifies it.

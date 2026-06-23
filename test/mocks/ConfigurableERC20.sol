@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.34;
 
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
+
 /// @notice A MockERC20 whose `transfer`/`approve` can be made to return `false` for a specific caller, used to cover
 /// the vault's raw-bool failure paths (`TransferFailed` / `ApproveFailed`). Keying on `msg.sender` lets the same token
 /// keep working for ConditionalTokens' collateral transfers and users' approvals while only the vault's call fails.
-contract ConfigurableERC20 {
+contract ConfigurableERC20 is IERC20 {
     string public name;
     string public symbol;
     uint8 public decimals = 18;
@@ -34,11 +36,13 @@ contract ConfigurableERC20 {
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
         totalSupply += amount;
+        emit Transfer(address(0), to, amount);
     }
 
     function approve(address spender, uint256 amount) external returns (bool) {
         if (msg.sender == approveRevertsFor) return false;
         allowance[msg.sender][spender] = amount;
+        emit Approval(msg.sender, spender, amount);
         return true;
     }
 
@@ -46,6 +50,7 @@ contract ConfigurableERC20 {
         if (msg.sender == transferRevertsFor) return false;
         balanceOf[msg.sender] -= amount;
         balanceOf[to] += amount;
+        emit Transfer(msg.sender, to, amount);
         return true;
     }
 
@@ -56,6 +61,7 @@ contract ConfigurableERC20 {
         }
         balanceOf[from] -= amount;
         balanceOf[to] += amount;
+        emit Transfer(from, to, amount);
         return true;
     }
 }
