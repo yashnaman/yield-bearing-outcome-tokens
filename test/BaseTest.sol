@@ -12,7 +12,8 @@ import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeToke
 
 import {MockERC20} from "test/mocks/MockERC20.sol";
 import {MockERC4626} from "test/mocks/MockERC4626.sol";
-import {ERC4626VaultAdapter} from "test/mocks/ERC4626VaultAdapter.sol";
+import {ERC4626VaultAdapter} from "src/adapters/ERC4626VaultAdapter.sol";
+import {ERC4626VaultAdapterFactory} from "src/adapters/ERC4626VaultAdapterFactory.sol";
 
 /// @dev The subset of the real Gnosis ConditionalTokens surface the tests drive directly. The vault only depends on
 /// `IConditionalTokens`; this extends it with the condition-setup and id-derivation helpers used to build fixtures.
@@ -65,6 +66,7 @@ contract BaseTest is Test {
     MockERC20 internal collateral;
     MockERC4626 internal erc4626;
     ERC4626VaultAdapter internal adapter;
+    ERC4626VaultAdapterFactory internal factory;
     YieldBearingOutcomeTokens internal vault;
 
     bytes32 internal questionId;
@@ -94,7 +96,10 @@ contract BaseTest is Test {
         vault = new YieldBearingOutcomeTokens(ct);
         vm.label(address(vault), "Vault");
 
-        adapter = new ERC4626VaultAdapter(IERC4626(address(erc4626)), address(vault));
+        factory = new ERC4626VaultAdapterFactory(address(vault));
+        vm.label(address(factory), "AdapterFactory");
+
+        adapter = factory.deployAdapter(IERC4626(address(erc4626)));
         vm.label(address(adapter), "Adapter");
 
         questionId = keccak256("question");

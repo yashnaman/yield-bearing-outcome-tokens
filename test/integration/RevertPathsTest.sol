@@ -8,7 +8,7 @@ import {IVaultAdapter} from "src/interface/IVaultAdapter.sol";
 import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeTokens.sol";
 import {ConfigurableERC20} from "test/mocks/ConfigurableERC20.sol";
 import {MockERC4626} from "test/mocks/MockERC4626.sol";
-import {ERC4626VaultAdapter} from "test/mocks/ERC4626VaultAdapter.sol";
+import {ERC4626VaultAdapter} from "src/adapters/ERC4626VaultAdapter.sol";
 
 /// @notice Covers the vault's raw-bool collateral failure paths, which only trigger when a non-conforming token's
 /// `transfer`/`approve` returns false. A `ConfigurableERC20` is used as collateral and made to fail only for the
@@ -27,7 +27,7 @@ contract RevertPathsTest is BaseTest {
 
         badCollateral = new ConfigurableERC20("Bad", "BAD");
         badVault = new MockERC4626(IERC20(address(badCollateral)));
-        badAdapter = new ERC4626VaultAdapter(IERC4626(address(badVault)), address(vault));
+        badAdapter = factory.deployAdapter(IERC4626(address(badVault)));
         badMarket = IYieldBearingOutcomeTokens.MarketParams({
             collateralToken: IERC20(address(badCollateral)),
             conditionId: conditionId,

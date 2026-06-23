@@ -6,7 +6,8 @@ import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 import {IVaultAdapter} from "src/interface/IVaultAdapter.sol";
 import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeTokens.sol";
-import {ERC4626VaultAdapter} from "test/mocks/ERC4626VaultAdapter.sol";
+import {ERC4626VaultAdapter} from "src/adapters/ERC4626VaultAdapter.sol";
+import {ERC4626VaultAdapterFactory} from "src/adapters/ERC4626VaultAdapterFactory.sol";
 
 /// @title InvariantBaseTest
 /// @notice Shared harness for the invariant suites, in the style of morpho-blue's BaseInvariantTest: handler methods
@@ -39,8 +40,10 @@ abstract contract InvariantBaseTest is BaseTest {
         super.setUp();
 
         // A second honest adapter over the SAME ERC4626 vault, so markets A and B share collateral+condition but not
-        // their adapter.
-        adapterB = new ERC4626VaultAdapter(IERC4626(address(erc4626)), address(vault));
+        // their adapter. Each factory salts on the vault address alone, so a single factory deploys at most one adapter
+        // per vault; a second factory (a distinct CREATE2 deployer) is used to deploy adapterB at a different address.
+        ERC4626VaultAdapterFactory factoryB = new ERC4626VaultAdapterFactory(address(vault));
+        adapterB = factoryB.deployAdapter(IERC4626(address(erc4626)));
         vm.label(address(adapterB), "AdapterB");
 
         // Seed the underlying ERC4626 with a large 1:1 position held by this harness and never withdrawn. This keeps
