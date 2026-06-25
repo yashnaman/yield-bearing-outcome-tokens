@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity >=0.5.1;
 
+// not in scope for audit. Taken from https://github.com/Polymarket/neg-risk-ctf-adapter/blob/main/src/libraries/CTHelpers.sol
 // forked from Gnosis Condtional Tokens
 library CTHelpers {
     /// @dev Constructs a condition ID from an oracle, a question ID, and the outcome slot count for
