@@ -126,7 +126,9 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // mints a combined ERC1155 position rather than returning collateral, so the deposit below reverts and the
         // deposit fails. The outcome token already deposited on the other side stays redeemable, so there is no
         // self-harm or stuck funds.
-        CONDITIONAL_TOKENS.mergePositions(collateralToken, PARENT_COLLECTION_ID, conditionId, partition(), completeSets);
+        CONDITIONAL_TOKENS.mergePositions(
+            collateralToken, PARENT_COLLECTION_ID, conditionId, _partition(), completeSets
+        );
 
         // `deposit` pulls the collateral from this contract, so approve it first. Raw approve with a bool check, the
         // same way ConditionalTokens handles collateral; a token that does not conform cannot back outcome tokens in
@@ -201,7 +203,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // in ConditionalTokens either, so we inherit that limitation here.
         require(collateralToken.approve(address(CONDITIONAL_TOKENS), amount), ApproveFailed());
 
-        CONDITIONAL_TOKENS.splitPosition(collateralToken, PARENT_COLLECTION_ID, conditionId, partition(), amount);
+        CONDITIONAL_TOKENS.splitPosition(collateralToken, PARENT_COLLECTION_ID, conditionId, _partition(), amount);
     }
 
     /* AUTHORIZATION */
@@ -265,13 +267,13 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     }
 
     /// @dev returns the partition for a binary conditional token the partition [1,2] = [0b01, 0b10]
-    function partition() internal pure returns (uint256[] memory partition_) {
+    function _partition() internal pure returns (uint256[] memory partition) {
         assembly ("memory-safe") {
-            partition_ := mload(0x40)
-            mstore(partition_, 2)
-            mstore(add(partition_, 0x20), 1)
-            mstore(add(partition_, 0x40), 2)
-            mstore(0x40, add(partition_, 0x60))
+            partition := mload(0x40)
+            mstore(partition, 2)
+            mstore(add(partition, 0x20), 1)
+            mstore(add(partition, 0x40), 2)
+            mstore(0x40, add(partition, 0x60))
         }
     }
 
