@@ -279,7 +279,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) external pure override returns (bool) {
-        return interfaceId == type(IERC1155TokenReceiver).interfaceId;
+        return interfaceId == type(IERC1155TokenReceiver).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     /// @inheritdoc IERC1155TokenReceiver

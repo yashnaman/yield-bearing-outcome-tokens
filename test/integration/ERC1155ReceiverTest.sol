@@ -13,9 +13,12 @@ contract ERC1155ReceiverTest is BaseTest {
         );
     }
 
+    function testSupportsERC165InteraceItself() public view {
+        assertTrue(vault.supportsInterface(0x01ffc9a7), "supports ERC165 itself as well");
+    }
+
     function testDoesNotSupportRandomInterface() public view {
         assertFalse(vault.supportsInterface(0xffffffff), "rejects unknown interface id");
-        assertFalse(vault.supportsInterface(0x01ffc9a7), "does not over-claim ERC165 itself");
     }
 
     /// @dev The hooks return their ERC1155 magic-value selectors.
