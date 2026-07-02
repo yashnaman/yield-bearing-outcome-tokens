@@ -51,7 +51,7 @@ contract AdversarialInvariantTest is InvariantBaseTest {
     }
 
     function evilRedeemHandler(bool isYes, uint256 sharesSeed) external {
-        uint256 held = vault.sharesOf(_id(marketD), isYes, msg.sender);
+        uint256 held = vault.sharesOf(marketD.vault, marketD.conditionId, isYes, msg.sender);
         if (held == 0) return;
         uint256 shares = bound(sharesSeed, 1, held);
         vm.prank(msg.sender);
@@ -70,7 +70,7 @@ contract AdversarialInvariantTest is InvariantBaseTest {
             evil.setWithdrawPayoutBips(bound(value, 0, 10_000));
         } else {
             // Arm a reentrant redeem of market D during the next withdraw.
-            uint256 held = vault.sharesOf(_id(marketD), isYes, msg.sender);
+            uint256 held = vault.sharesOf(marketD.vault, marketD.conditionId, isYes, msg.sender);
             bytes memory data =
                 abi.encodeCall(vault.redeem, (marketD.vault, marketD.conditionId, isYes, held, msg.sender, msg.sender));
             evil.setReentrancy(MaliciousERC4626.ReenterOn.WITHDRAW, address(vault), data);
@@ -94,9 +94,9 @@ contract AdversarialInvariantTest is InvariantBaseTest {
         sharing[2] = marketD;
         _assertPool(conditionId, true, sharing);
         _assertPool(conditionId, false, sharing);
-        // Condition 2 is untouched by the hostile market.
-        _assertPool(conditionId2, true, _one(marketC));
-        _assertPool(conditionId2, false, _one(marketC));
+        // Condition 2 (shared by honest markets C and S) is untouched by the hostile market.
+        _assertPool(conditionId2, true, _two(marketC, marketS));
+        _assertPool(conditionId2, false, _two(marketC, marketS));
     }
 
     /// @dev Holders of the honest markets can always exit in full, no matter what the hostile market does.

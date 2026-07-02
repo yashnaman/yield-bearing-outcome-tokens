@@ -16,6 +16,9 @@ import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeToke
 /// deposited into the market's ERC-4626 yield vault. Yield is distributed back to each side by splitting it into fresh
 /// YES/NO pairs, so the scarce (fully matched) side earns the full rate and the surplus side is diluted by its
 /// utilization. Each `(id, isYes)` side runs its own share index, in the spirit of a lending pool's liquidity index.
+/// Merging is best-effort: if the yield vault refuses the merged collateral (e.g. a tiny amount rounds to zero
+/// shares), both sides keep their dangling balances and the merge is retried on a later deposit — so both sides of a
+/// market may dangle simultaneously.
 /// @dev A market is the pair (`yieldVault`, `conditionId`); its collateral is the yield vault's underlying `asset()`.
 /// The yield-vault shares minted by investing merged collateral are tracked per market in `vaultSharesOf`, so two
 /// markets that share a ConditionalTokens position-id pool (same collateral and condition over different yield vaults)
@@ -30,6 +33,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /* ERRORS */
 
     error ApproveFailed();
+    /// @notice Thrown when a self-call-only function is called by an account other than this contract.
+    error OnlySelf();
     /// @notice Thrown when `msg.sender` is neither `onBehalf` nor authorized to act on its behalf.
     error Unauthorized();
     /// @notice Thrown when `setAuthorization` is called with the value already set.
@@ -107,25 +112,38 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         depositSide.danglingBalance = dangling - completeSets;
         if (completeSets > 0) {
             otherSide.danglingBalance = otherDanglingBalance - completeSets;
-            _mergeAndDeposit(yieldVault, conditionId, collateralToken, id, completeSets);
+            // Best-effort: the merge and the vault deposit run atomically in an external self-call so a vault that
+            // refuses the deposit (e.g. the merged amount rounds to zero shares) rolls the merge back instead of
+            // blocking the whole deposit. Bare catch on purpose: any failure defers the merge.
+            try this.mergeAndDeposit(yieldVault, conditionId, collateralToken, id, completeSets) {}
+            catch {
+                // The subframe reverted in full (merge, approve, vault deposit and any reentrant effects), so
+                // restoring the cached balances leaves both sides dangling; the next deposit recomputes
+                // `completeSets` from both sides and retries.
+                depositSide.danglingBalance = dangling;
+                otherSide.danglingBalance = otherDanglingBalance;
+            }
         }
 
         emit Deposit(id, isYes, msg.sender, to, assets, shares);
     }
 
     /// @dev Merges `completeSets` complete sets into collateral, then deposits that collateral into the market's yield
-    /// vault and books the minted shares to the market.
-    function _mergeAndDeposit(
+    /// vault and books the minted shares to the market. External (self-call only) so `deposit` can wrap it in
+    /// try/catch and roll the merge back atomically when any step reverts; never call it directly.
+    function mergeAndDeposit(
         IERC4626 yieldVault,
         bytes32 conditionId,
         IERC20 collateralToken,
         bytes32 id,
         uint256 completeSets
-    ) internal {
+    ) external {
+        require(msg.sender == address(this), OnlySelf());
+
         // Assumes a binary market: merging the {1},{2} pair returns collateral. If outcomeSlotCount > 2 this instead
-        // mints a combined ERC1155 position rather than returning collateral, so the deposit below reverts and the
-        // deposit fails. The outcome token already deposited on the other side stays redeemable, so there is no
-        // self-harm or stuck funds.
+        // mints a combined ERC1155 position rather than returning collateral, so the deposit below reverts, `deposit`
+        // catches it and both sides stay dangling. Such a market never invests, but every deposit remains redeemable
+        // through the dangling path, so there is no self-harm or stuck funds.
         CONDITIONAL_TOKENS.mergePositions(
             collateralToken, PARENT_COLLECTION_ID, conditionId, _partition(), completeSets
         );
@@ -135,11 +153,11 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // ConditionalTokens either, so we inherit that limitation here.
         require(collateralToken.approve(address(yieldVault), completeSets), ApproveFailed());
 
-        // ACCEPTED RISK: a 1-wei opposite deposit forces a 1-wei merge, and if the vault rounds `deposit(1)` to 0
-        // shares the collateral reaches the vault but `vaultSharesOf[id]` does not grow, leaking 1 wei of backing to the
-        // vault's other depositors. Bounded to ~1 wei per attack and self-harming (the attacker holds losing market shares too
-        // and pays gas), so it is uneconomical. If underlying vault has virtual shares calculation with high decimals offset,
-        // the attack impact reduces even further.
+        // ACCEPTED RISK: if the vault silently rounds a tiny `deposit` down to 0 shares instead of reverting, the
+        // collateral reaches the vault but `vaultSharesOf[id]` does not grow, leaking that dust of backing to the
+        // vault's other depositors. Bounded to ~1 wei per attack and self-harming (the attacker holds losing market
+        // shares too and pays gas), so it is uneconomical. If the underlying vault has virtual shares calculation with
+        // high decimals offset, the attack impact reduces even further.
         vaultSharesOf[id] += yieldVault.deposit(completeSets, address(this));
     }
 
@@ -221,19 +239,23 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
 
     /// @inheritdoc IYieldBearingOutcomeTokens
     /// @dev Exposed explicitly because `Side` holds a mapping and therefore has no auto-generated getter.
-    function totalShares(bytes32 marketId, bool outcome) external view returns (uint256) {
-        return side[marketId][outcome].totalShares;
+    function totalShares(IERC4626 yieldVault, bytes32 conditionId, bool outcome) external view returns (uint256) {
+        return side[_id(yieldVault, conditionId)][outcome].totalShares;
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens
-    function sharesOf(bytes32 marketId, bool outcome, address user) external view returns (uint256) {
-        return side[marketId][outcome].shares[user];
+    function sharesOf(IERC4626 yieldVault, bytes32 conditionId, bool outcome, address user)
+        external
+        view
+        returns (uint256)
+    {
+        return side[_id(yieldVault, conditionId)][outcome].shares[user];
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens
     /// @dev Exposed explicitly because `Side` holds a mapping and therefore has no auto-generated getter.
-    function danglingBalance(bytes32 marketId, bool outcome) external view returns (uint256) {
-        return side[marketId][outcome].danglingBalance;
+    function danglingBalance(IERC4626 yieldVault, bytes32 conditionId, bool outcome) external view returns (uint256) {
+        return side[_id(yieldVault, conditionId)][outcome].danglingBalance;
     }
 
     /// @inheritdoc IYieldBearingOutcomeTokens

@@ -18,7 +18,7 @@ contract AuthorizationTest is BaseTest {
         uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, ALICE);
 
         assertEq(assets, amount, "owner redeems own shares");
-        assertEq(vault.sharesOf(id, true, ALICE), 0, "shares burned");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), 0, "shares burned");
     }
 
     /// @dev An unauthorized third party cannot redeem another holder's shares.
@@ -29,7 +29,7 @@ contract AuthorizationTest is BaseTest {
         vm.expectRevert(YieldBearingOutcomeTokens.Unauthorized.selector);
         vault.redeem(defaultVault, conditionId, true, shares, ALICE, BOB);
 
-        assertEq(vault.sharesOf(id, true, ALICE), shares, "Alice's shares untouched");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), shares, "Alice's shares untouched");
     }
 
     /// @dev Once Alice authorizes Bob, Bob can burn Alice's shares and route the tokens wherever he likes.
@@ -46,7 +46,7 @@ contract AuthorizationTest is BaseTest {
         uint256 assets = vault.redeem(defaultVault, conditionId, true, shares, ALICE, RECEIVER);
 
         assertEq(assets, amount, "authorized party redeems on behalf");
-        assertEq(vault.sharesOf(id, true, ALICE), 0, "Alice's shares burned, not Bob's");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), 0, "Alice's shares burned, not Bob's");
         assertEq(ct.balanceOf(RECEIVER, yesPositionId), amount, "tokens routed to the chosen receiver");
     }
 

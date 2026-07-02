@@ -5,6 +5,7 @@ import {BaseTest} from "test/BaseTest.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 import {MockERC4626} from "test/mocks/MockERC4626.sol";
+import {ZeroShareRevertingERC4626} from "test/mocks/ZeroShareRevertingERC4626.sol";
 
 /// @title InvariantBaseTest
 /// @notice Shared harness for the invariant suites, in the style of morpho-blue's BaseInvariantTest: handler methods
@@ -12,10 +13,17 @@ import {MockERC4626} from "test/mocks/MockERC4626.sol";
 /// with `fail_on_revert = true`, so a guarded valid op reverting is itself a finding).
 ///
 /// The market topology is chosen to stress cross-market isolation: markets A and B share one collateral+condition (so
-/// they share a ConditionalTokens position-id pool) but invest into two distinct honest vaults; market C is on a second
-/// condition. Isolation is enforced only by the core's internal per-market `danglingBalance`.
+/// they share a ConditionalTokens position-id pool) but invest into two distinct honest vaults; markets C and S are on
+/// a second condition. Isolation is enforced only by the core's internal per-market `danglingBalance`. Market S invests
+/// into a vault that reverts on zero-share mints at a high share price, so runs organically hit both deferred and
+/// successful merges — with `fail_on_revert = true` this proves deposits stay live while merges defer.
 abstract contract InvariantBaseTest is BaseTest {
     MockERC4626 internal erc4626B;
+    ZeroShareRevertingERC4626 internal strictErc4626;
+
+    /// @dev Share price the strict vault is seeded to: merges below this amount mint zero shares and are deferred.
+    /// Sits between MIN_INVARIANT_AMOUNT and MAX_INVARIANT_AMOUNT so a run exercises both outcomes.
+    uint256 internal constant STRICT_RATE = 1e9;
 
     bytes32 internal conditionId2;
     bytes32 internal questionId2;
@@ -23,6 +31,7 @@ abstract contract InvariantBaseTest is BaseTest {
     Market internal marketA; // default vault, condition 1
     Market internal marketB; // vault B, condition 1 (shares A's pool)
     Market internal marketC; // default vault, condition 2 (separate pool)
+    Market internal marketS; // strict vault (reverts on zero-share mints), condition 2 (shares C's pool)
 
     Market[] internal markets;
 
@@ -52,7 +61,16 @@ abstract contract InvariantBaseTest is BaseTest {
         collateral.approve(address(erc4626B), seed);
         erc4626B.deposit(seed, address(this));
 
-        // A second binary condition for a market on a separate position-id pool.
+        // A strict vault that reverts on zero-share mints, deliberately seeded to a share price of STRICT_RATE so that
+        // small merges round to zero shares and are deferred rather than blocking deposits.
+        strictErc4626 = new ZeroShareRevertingERC4626(IERC20(address(collateral)));
+        vm.label(address(strictErc4626), "ERC4626_Strict");
+        collateral.mint(address(this), STRICT_RATE);
+        collateral.approve(address(strictErc4626), 1);
+        strictErc4626.deposit(1, address(this));
+        collateral.transfer(address(strictErc4626), STRICT_RATE - 1);
+
+        // A second binary condition for markets on a separate position-id pool.
         questionId2 = keccak256("question2");
         ct.prepareCondition(ORACLE, questionId2, 2);
         conditionId2 = ct.getConditionId(ORACLE, questionId2, 2);
@@ -60,10 +78,12 @@ abstract contract InvariantBaseTest is BaseTest {
         marketA = Market({vault: defaultVault, conditionId: conditionId});
         marketB = Market({vault: IERC4626(address(erc4626B)), conditionId: conditionId});
         marketC = Market({vault: defaultVault, conditionId: conditionId2});
+        marketS = Market({vault: IERC4626(address(strictErc4626)), conditionId: conditionId2});
 
         markets.push(marketA);
         markets.push(marketB);
         markets.push(marketC);
+        markets.push(marketS);
 
         actors.push(ALICE);
         actors.push(BOB);
@@ -107,9 +127,8 @@ abstract contract InvariantBaseTest is BaseTest {
 
     function redeemHandler(uint256 marketSeed, bool isYes, uint256 sharesSeed) external {
         Market memory m = _market(marketSeed);
-        bytes32 mid = _id(m);
 
-        uint256 held = vault.sharesOf(mid, isYes, msg.sender);
+        uint256 held = vault.sharesOf(m.vault, m.conditionId, isYes, msg.sender);
         if (held == 0) return;
         uint256 shares = bound(sharesSeed, 1, held);
 
@@ -145,9 +164,9 @@ abstract contract InvariantBaseTest is BaseTest {
     /* INVARIANT BUILDING BLOCKS */
 
     /// @dev Sum of all tracked actors' shares for a (market, side).
-    function _sumActorShares(bytes32 mid, bool isYes) internal view returns (uint256 sum) {
+    function _sumActorShares(Market memory m, bool isYes) internal view returns (uint256 sum) {
         for (uint256 i; i < actors.length; ++i) {
-            sum += vault.sharesOf(mid, isYes, actors[i]);
+            sum += vault.sharesOf(m.vault, m.conditionId, isYes, actors[i]);
         }
     }
 
@@ -155,9 +174,13 @@ abstract contract InvariantBaseTest is BaseTest {
     /// is minted to or stranded on an untracked account).
     function assertShareConservation() internal view {
         for (uint256 i; i < markets.length; ++i) {
-            bytes32 mid = _id(markets[i]);
-            assertEq(_sumActorShares(mid, true), vault.totalShares(mid, true), "YES share conservation");
-            assertEq(_sumActorShares(mid, false), vault.totalShares(mid, false), "NO share conservation");
+            Market memory m = markets[i];
+            assertEq(
+                _sumActorShares(m, true), vault.totalShares(m.vault, m.conditionId, true), "YES share conservation"
+            );
+            assertEq(
+                _sumActorShares(m, false), vault.totalShares(m.vault, m.conditionId, false), "NO share conservation"
+            );
         }
     }
 
@@ -168,16 +191,16 @@ abstract contract InvariantBaseTest is BaseTest {
         // Condition 1 pool is shared by markets A and B.
         _assertPool(conditionId, true, _two(marketA, marketB));
         _assertPool(conditionId, false, _two(marketA, marketB));
-        // Condition 2 pool belongs to market C alone.
-        _assertPool(conditionId2, true, _one(marketC));
-        _assertPool(conditionId2, false, _one(marketC));
+        // Condition 2 pool is shared by markets C and S.
+        _assertPool(conditionId2, true, _two(marketC, marketS));
+        _assertPool(conditionId2, false, _two(marketC, marketS));
     }
 
     function _assertPool(bytes32 cond, bool isYes, Market[] memory sharing) internal view {
         uint256 positionId = _positionId(IERC20(address(collateral)), cond, isYes);
         uint256 sumDangling;
         for (uint256 i; i < sharing.length; ++i) {
-            sumDangling += vault.danglingBalance(_id(sharing[i]), isYes);
+            sumDangling += vault.danglingBalance(sharing[i].vault, sharing[i].conditionId, isYes);
         }
         assertEq(
             _vaultPositionBalance(positionId), sumDangling + donated[positionId], "pool == sum of dangling + donated"
@@ -191,11 +214,10 @@ abstract contract InvariantBaseTest is BaseTest {
         uint256 snap = vm.snapshotState();
         for (uint256 i; i < markets.length; ++i) {
             Market memory m = markets[i];
-            bytes32 mid = _id(m);
             for (uint256 s; s < 2; ++s) {
                 bool isYes = s == 0;
                 for (uint256 a; a < actors.length; ++a) {
-                    uint256 held = vault.sharesOf(mid, isYes, actors[a]);
+                    uint256 held = vault.sharesOf(m.vault, m.conditionId, isYes, actors[a]);
                     if (held == 0) continue;
                     vm.prank(actors[a]);
                     vault.redeem(m.vault, m.conditionId, isYes, held, actors[a], actors[a]);
@@ -214,6 +236,9 @@ abstract contract InvariantBaseTest is BaseTest {
 
         uint256 claimedB = vault.investedBalance(marketB.vault, marketB.conditionId);
         assertLe(claimedB, erc4626B.totalAssets(), "vault B: market cannot claim more than it holds");
+
+        uint256 claimedStrict = vault.investedBalance(marketS.vault, marketS.conditionId);
+        assertLe(claimedStrict, strictErc4626.totalAssets(), "strict vault: market cannot claim more than it holds");
     }
 
     function _one(Market memory a) internal pure returns (Market[] memory arr) {

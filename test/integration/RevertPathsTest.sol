@@ -43,17 +43,31 @@ contract RevertPathsTest is BaseTest {
     }
 
     /// @dev When merging complete sets, the vault approves the ERC-4626 vault to pull the collateral; if that approve
-    /// returns false the deposit reverts with ApproveFailed.
-    function testMergeRevertsOnFailedApprove() public {
+    /// returns false the merge is rolled back and deferred — the deposit still succeeds with both sides left dangling,
+    /// and a later deposit retries the merge once the approve works again.
+    function testApproveFailureDefersMerge() public {
         _depositBad(ALICE, true, 100); // YES dangling, no merge yet
 
         // Make the vault's own collateral.approve (to the ERC-4626 vault) return false during the merging deposit.
         badCollateral.setApproveRevertsFor(address(vault));
 
-        _giveBadOutcomeTokens(BOB, 100);
-        vm.prank(BOB);
-        vm.expectRevert(ApproveFailed.selector);
-        vault.deposit(badVault, conditionId, false, 100, BOB); // matches -> triggers merge-and-invest -> failing approve
+        _depositBad(BOB, false, 100); // matches -> merge attempted -> failing approve -> deferred, not reverted
+
+        assertEq(
+            vault.danglingBalance(badVault, conditionId, true), 100, "YES keeps its dangling after the deferred merge"
+        );
+        assertEq(
+            vault.danglingBalance(badVault, conditionId, false), 100, "NO keeps its dangling after the deferred merge"
+        );
+        assertEq(vault.investedBalance(badVault, conditionId), 0, "nothing invested while approve fails");
+
+        // Once the approve works again, the next deposit retries the accumulated merge and invests it.
+        badCollateral.setApproveRevertsFor(address(0));
+        _depositBad(BOB, false, 1);
+
+        assertEq(vault.investedBalance(badVault, conditionId), 100, "retried merge invests the matched sets");
+        assertEq(vault.danglingBalance(badVault, conditionId, true), 0, "YES fully matched");
+        assertEq(vault.danglingBalance(badVault, conditionId, false), 1, "NO keeps only its surplus");
     }
 
     /// @dev When a redemption must withdraw and split, the vault approves ConditionalTokens to pull the collateral; if
@@ -63,7 +77,7 @@ contract RevertPathsTest is BaseTest {
         _depositBad(ALICE, true, 100);
         _depositBad(BOB, false, 100); // fully matched -> 100 invested, NO side has no dangling
 
-        uint256 bobShares = vault.sharesOf(_id(badVault, conditionId), false, BOB);
+        uint256 bobShares = vault.sharesOf(badVault, conditionId, false, BOB);
 
         // Make the vault's approve to ConditionalTokens return false during the withdraw-and-split.
         badCollateral.setApproveRevertsFor(address(vault));
@@ -76,7 +90,7 @@ contract RevertPathsTest is BaseTest {
     /// @dev Directly exercises the `danglingBalance` getter: after an unmatched deposit it equals the deposited amount.
     function testDanglingBalanceGetter() public {
         _deposit(ALICE, true, 100); // default market, unmatched YES
-        assertEq(vault.danglingBalance(id, true), 100, "dangling reflects the unmatched deposit");
-        assertEq(vault.danglingBalance(id, false), 0, "opposite side has no dangling");
+        assertEq(vault.danglingBalance(defaultVault, conditionId, true), 100, "dangling reflects the unmatched deposit");
+        assertEq(vault.danglingBalance(defaultVault, conditionId, false), 0, "opposite side has no dangling");
     }
 }

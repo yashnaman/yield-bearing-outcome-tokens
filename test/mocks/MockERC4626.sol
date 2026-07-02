@@ -105,7 +105,7 @@ contract MockERC4626 is IERC4626 {
 
     /* ERC-4626 ENTRY POINTS */
 
-    function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
+    function deposit(uint256 assets, address receiver) public virtual returns (uint256 shares) {
         shares = convertToShares(assets);
         require(asset_.transferFrom(msg.sender, address(this), assets), "transferFrom failed");
         totalSupply += shares;

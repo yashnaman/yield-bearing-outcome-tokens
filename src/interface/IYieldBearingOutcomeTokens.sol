@@ -54,26 +54,32 @@ interface IYieldBearingOutcomeTokens {
         mapping(address user => uint256 shares) shares;
     }
 
-    /// @notice Returns the total shares minted against the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
+    /// @notice Returns the total shares minted against the `outcome` side of the (`yieldVault`, `conditionId`) market.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into.
+    /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @return The total shares minted on that side.
-    function totalShares(bytes32 marketId, bool outcome) external view returns (uint256);
+    function totalShares(IERC4626 yieldVault, bytes32 conditionId, bool outcome) external view returns (uint256);
 
-    /// @notice Returns the shares held by `user` on the `outcome` side of market `marketId`.
-    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
+    /// @notice Returns the shares held by `user` on the `outcome` side of the (`yieldVault`, `conditionId`) market.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into.
+    /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @param user The address whose shares are queried.
     /// @return The shares held by `user` on that side.
-    function sharesOf(bytes32 marketId, bool outcome, address user) external view returns (uint256);
+    function sharesOf(IERC4626 yieldVault, bytes32 conditionId, bool outcome, address user)
+        external
+        view
+        returns (uint256);
 
-    /// @notice Returns the dangling outcome-token balance the vault holds for the `outcome` side of market `marketId`:
-    /// tokens received but not yet merged into collateral. Tracked internally per market so a market's balance is
-    /// isolated from others sharing the same ConditionalTokens position id.
-    /// @param marketId The id of the market, the hash of its (`vault`, `conditionId`).
+    /// @notice Returns the dangling outcome-token balance the vault holds for the `outcome` side of the
+    /// (`yieldVault`, `conditionId`) market: tokens received but not yet merged into collateral. Tracked internally
+    /// per market so a market's balance is isolated from others sharing the same ConditionalTokens position id.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into.
+    /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param outcome The side to query, `true` for YES and `false` for NO.
     /// @return The dangling outcome-token balance held on that side.
-    function danglingBalance(bytes32 marketId, bool outcome) external view returns (uint256);
+    function danglingBalance(IERC4626 yieldVault, bytes32 conditionId, bool outcome) external view returns (uint256);
 
     /// @notice Returns the collateral currently recoverable for the (`yieldVault`, `conditionId`) market if its
     /// invested position were withdrawn now, denominated in outcome-token (== collateral) decimals.
@@ -85,7 +91,9 @@ interface IYieldBearingOutcomeTokens {
     /// @notice Deposits `assets` outcome tokens of the `isYes` side of the (`yieldVault`, `conditionId`) market and
     /// mints shares to `to`.
     /// @dev Pulls the outcome tokens from `msg.sender`, then rebalances the market: any complete sets the deposit
-    /// enables are merged into collateral and deposited into the yield vault.
+    /// enables are merged into collateral and deposited into the yield vault, best-effort — if the yield vault rejects
+    /// that deposit (e.g. the merged amount would mint zero shares), the merge is rolled back, both sides keep their
+    /// dangling balances, and the match is retried on a later deposit.
     /// @param yieldVault The ERC-4626 vault the market invests merged collateral into; its `asset()` is the collateral.
     /// @param conditionId The ConditionalTokens condition id of the market.
     /// @param isYes The side to deposit, `true` for YES and `false` for NO.

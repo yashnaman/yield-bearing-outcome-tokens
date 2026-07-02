@@ -40,7 +40,7 @@ contract ResolutionIntegrationTest is BaseTest {
 
         // Bob actually wants YES (the winner); deposit a matching YES position so he can pull YES out. For simplicity
         // here, Alice (YES depositor) redeems her YES shares back to YES tokens, then claims at CT after resolution.
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         _redeem(ALICE, true, aliceShares);
         assertEq(ct.balanceOf(ALICE, yesPositionId), 100, "Alice holds her YES tokens again");
 

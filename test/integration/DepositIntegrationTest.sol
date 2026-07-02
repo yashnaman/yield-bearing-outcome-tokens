@@ -17,8 +17,8 @@ contract DepositIntegrationTest is BaseTest {
         uint256 shares = _deposit(ALICE, true, amount);
 
         assertEq(shares, amount * VIRTUAL_SHARES / VIRTUAL_ASSETS, "first deposit share price");
-        assertEq(vault.totalShares(id, true), shares, "totalShares updated");
-        assertEq(vault.sharesOf(id, true, ALICE), shares, "user shares credited");
+        assertEq(vault.totalShares(defaultVault, conditionId, true), shares, "totalShares updated");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), shares, "user shares credited");
         // No opposite side yet, so nothing merges; the deposit stays dangling and the vault holds the tokens.
         assertEq(vault.investedBalance(defaultVault, conditionId), 0, "nothing invested without a match");
         assertEq(_vaultPositionBalance(yesPositionId), amount, "vault holds the dangling YES tokens");
@@ -60,9 +60,11 @@ contract DepositIntegrationTest is BaseTest {
         vm.prank(ALICE);
         uint256 shares = vault.deposit(defaultVault, conditionId, true, amount, to);
 
-        assertEq(vault.sharesOf(id, true, to), shares, "shares credited to receiver");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, to), shares, "shares credited to receiver");
         if (to != ALICE) {
-            assertEq(vault.sharesOf(id, true, ALICE), 0, "caller receives nothing when to != caller");
+            assertEq(
+                vault.sharesOf(defaultVault, conditionId, true, ALICE), 0, "caller receives nothing when to != caller"
+            );
         }
     }
 
@@ -76,7 +78,9 @@ contract DepositIntegrationTest is BaseTest {
         vm.prank(ALICE);
         vault.deposit(defaultVault, conditionId, true, 100, BOB);
 
-        assertEq(vault.sharesOf(id, true, BOB), expectedShares, "shares minted to `to`, not caller");
+        assertEq(
+            vault.sharesOf(defaultVault, conditionId, true, BOB), expectedShares, "shares minted to `to`, not caller"
+        );
     }
 
     /// @dev The vault only accepts outcome tokens forwarded by ConditionalTokens; depositing without approval reverts.

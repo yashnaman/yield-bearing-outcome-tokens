@@ -59,7 +59,7 @@ contract MaliciousVaultTest is BaseTest {
         assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved");
 
         // And Alice redeems her full honest position.
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         uint256 assets = _redeem(ALICE, true, aliceShares);
         assertEq(assets, HONEST_DEPOSIT, "Alice fully redeems despite the hostile sibling market");
     }
@@ -84,7 +84,7 @@ contract MaliciousVaultTest is BaseTest {
 
         assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved");
 
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         assertEq(_redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice still whole");
     }
 
@@ -105,8 +105,41 @@ contract MaliciousVaultTest is BaseTest {
         vault.redeem(evilVault, conditionId, true, attackerShares, ATTACKER, ATTACKER);
 
         // Honest market entirely unaffected.
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         assertEq(_redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice unaffected by the hostile market's self-DoS");
+    }
+
+    /// @dev The hostile vault reenters the core during the merge's `deposit` (inside the try frame of the best-effort
+    /// merge). Both sides' dangling balances are settled before that external call, so the reentrant redeem sees no
+    /// stale balance to double-spend; it can only burn the attacker's own shares. The honest pool stays whole and the
+    /// pooled balance still matches the sum of the markets' dangling balances.
+    function testReentrantDepositInsideMergeFrameCannotCorruptAccounting() public {
+        uint256 attackerYesShares = _depositEvil(ATTACKER, true, 100);
+
+        // On the merge's vault deposit, reenter and try to redeem the attacker's YES shares mid-flight.
+        bytes memory reentryData =
+            abi.encodeCall(vault.redeem, (evilVault, conditionId, true, attackerYesShares, ATTACKER, ATTACKER));
+        evil.setReentrancy(MaliciousERC4626.ReenterOn.DEPOSIT, address(vault), reentryData);
+
+        _depositEvil(ATTACKER, false, 100); // matches -> merge -> evil deposit -> reentrant redeem
+
+        // The reentrant redeem observed settled danglings (both zero) and a not-yet-booked invested balance, so it
+        // could not extract anything; the honest market's parked tokens are intact and Alice redeems in full.
+        assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved through reentrancy");
+        assertEq(
+            _vaultPositionBalance(yesPositionId),
+            vault.danglingBalance(defaultVault, conditionId, true)
+                + vault.danglingBalance(evilVault, conditionId, true),
+            "YES pool == sum of danglings"
+        );
+        assertEq(
+            _vaultPositionBalance(noPositionId),
+            vault.danglingBalance(defaultVault, conditionId, false)
+                + vault.danglingBalance(evilVault, conditionId, false),
+            "NO pool == sum of danglings"
+        );
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
+        assertEq(_redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice unaffected by reentrancy");
     }
 
     /// @dev The hostile vault reenters the core during `withdraw`, attempting a second redeem of its own market. The
@@ -128,7 +161,7 @@ contract MaliciousVaultTest is BaseTest {
 
         // No matter the outcome, the honest market's parked tokens are intact and Alice redeems in full.
         assertGe(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved through reentrancy");
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         assertEq(_redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice unaffected by reentrancy");
     }
 }

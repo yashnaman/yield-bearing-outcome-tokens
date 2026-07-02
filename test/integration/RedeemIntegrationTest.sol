@@ -27,7 +27,7 @@ contract RedeemIntegrationTest is BaseTest {
         assertEq(assets, amount, "redeems exactly what was deposited");
         assertEq(vault.investedBalance(defaultVault, conditionId), 0, "vault untouched");
         assertEq(ct.balanceOf(ALICE, yesPositionId), amount, "outcome tokens returned to user");
-        assertEq(vault.sharesOf(id, true, ALICE), 0, "shares burned");
+        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), 0, "shares burned");
     }
 
     /// @dev When the side's tokens were merged away, redemption must divest collateral and split it back into a fresh

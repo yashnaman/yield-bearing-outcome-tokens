@@ -38,9 +38,9 @@ contract InvestedBalanceTest is BaseTest {
         assertEq(vault.investedBalance(defaultVault, conditionId), 1000, "matched sets invested");
 
         // Redeem both sides; the invested collateral is withdrawn back out and the balance drains to zero.
-        uint256 aliceShares = vault.sharesOf(id, true, ALICE);
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         _redeem(ALICE, true, aliceShares);
-        uint256 bobShares = vault.sharesOf(id, false, BOB);
+        uint256 bobShares = vault.sharesOf(defaultVault, conditionId, false, BOB);
         _redeem(BOB, false, bobShares);
 
         assertEq(vault.investedBalance(defaultVault, conditionId), 0, "invested balance drained");
@@ -56,8 +56,8 @@ contract InvestedBalanceTest is BaseTest {
         assertEq(vault.investedBalance(defaultVault, conditionId2), 4000, "market 2 tracked independently");
 
         // Fully draining market 1 leaves market 2 intact.
-        _redeem(ALICE, true, vault.sharesOf(id, true, ALICE));
-        _redeem(BOB, false, vault.sharesOf(id, false, BOB));
+        _redeem(ALICE, true, vault.sharesOf(defaultVault, conditionId, true, ALICE));
+        _redeem(BOB, false, vault.sharesOf(defaultVault, conditionId, false, BOB));
 
         assertEq(vault.investedBalance(defaultVault, conditionId), 0, "market 1 drained");
         assertEq(vault.investedBalance(defaultVault, conditionId2), 4000, "market 2 still fully funded");
