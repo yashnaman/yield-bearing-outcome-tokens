@@ -5,6 +5,7 @@ import {BaseTest} from "test/BaseTest.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 import {MaliciousERC4626} from "test/mocks/MaliciousERC4626.sol";
+import {MockERC20} from "test/mocks/MockERC20.sol";
 
 /// @notice Proves the "a market's vault can't harm a sibling" property: a market wired to a hostile ERC-4626 vault can
 /// never steal from, or DoS, a market on an honest vault — even though both markets share the same collateral and
@@ -86,6 +87,42 @@ contract MaliciousVaultTest is BaseTest {
 
         uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
         assertEq(_redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice still whole");
+    }
+
+    /// @dev A vault whose `asset()` differs between deposit and redeem must not let a market built on a worthless
+    /// collateral redeem a valuable collateral's outcome tokens out of the shared pool. The collateral is bound into
+    /// the market id, so the redeem resolves to a fresh, empty market and reverts on the share-balance underflow
+    /// instead of paying out the honest market's tokens. (Regression for the "unbound collateral / mutable asset()"
+    /// finding.)
+    function testMutableAssetCannotRedeemForeignCollateral() public {
+        // A worthless collateral the attacker fully controls, split into cheap YES the hostile market will hold.
+        MockERC20 cheap = new MockERC20("Cheap", "CHP");
+        vm.label(address(cheap), "CheapCollateral");
+
+        // 1. The hostile vault reports the worthless collateral on deposit.
+        evil.setAsset(IERC20(address(cheap)));
+
+        // 2. Attacker deposits 100 cheap-YES into the hostile market. No NO side => no merge, so the vault's ERC-4626
+        //    deposit is never invoked; only `asset()` is read to key the market and pull the tokens.
+        _mintOutcomeTokens(ATTACKER, IERC20(address(cheap)), conditionId, 100);
+        vm.prank(ATTACKER);
+        uint256 attackerShares = vault.deposit(evilVault, conditionId, true, 100, ATTACKER);
+
+        // 3. Attacker flips the vault to report the valuable collateral the honest market uses.
+        evil.setAsset(IERC20(address(collateral)));
+
+        // 4. Redeem now resolves to a different market id (collateral is part of it), where the attacker holds zero
+        //    shares, so the share subtraction underflow-reverts instead of paying out Alice's YES tokens.
+        vm.prank(ATTACKER);
+        vm.expectRevert();
+        vault.redeem(evilVault, conditionId, true, attackerShares, ATTACKER, ATTACKER);
+
+        // The honest market's parked tokens are untouched and Alice redeems in full.
+        assertEq(_vaultPositionBalance(yesPositionId), HONEST_DEPOSIT, "honest tokens preserved");
+        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
+        assertEq(
+            _redeem(ALICE, true, aliceShares), HONEST_DEPOSIT, "Alice fully redeems despite the mutable-asset market"
+        );
     }
 
     /// @dev A withdraw that short-pays or withholds collateral makes the split revert, so the hostile market's own

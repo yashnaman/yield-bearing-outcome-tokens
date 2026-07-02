@@ -111,11 +111,11 @@ contract BaseTest is Test {
 
     /* ID HELPERS */
 
-    function _id(IERC4626 vault_, bytes32 conditionId_) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(address(vault_), conditionId_));
+    function _id(IERC4626 vault_, bytes32 conditionId_) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(address(vault_), vault_.asset(), conditionId_));
     }
 
-    function _id(Market memory m) internal pure returns (bytes32) {
+    function _id(Market memory m) internal view returns (bytes32) {
         return _id(m.vault, m.conditionId);
     }
 

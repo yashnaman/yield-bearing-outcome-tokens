@@ -81,8 +81,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         external
         returns (uint256 shares)
     {
-        bytes32 id = _id(yieldVault, conditionId);
         IERC20 collateralToken = IERC20(yieldVault.asset());
+        bytes32 id = _id(yieldVault, collateralToken, conditionId);
 
         // Pull the deposited outcome tokens
         {
@@ -170,8 +170,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     {
         require(msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender], Unauthorized());
 
-        bytes32 id = _id(yieldVault, conditionId);
         IERC20 collateralToken = IERC20(yieldVault.asset());
+        bytes32 id = _id(yieldVault, collateralToken, conditionId);
 
         Side storage redeemSide = side[id][isYes];
         uint256 redeemSideTotalShares = redeemSide.totalShares;
@@ -272,9 +272,19 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         return yieldVault.previewRedeem(vaultSharesOf[id]);
     }
 
-    /// @dev Returns the market `id`, the hash of (`yieldVault`, `conditionId`) that uniquely identifies it.
-    function _id(IERC4626 yieldVault, bytes32 conditionId) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(address(yieldVault), conditionId));
+    /// @dev Returns the market `id`, the hash of (`yieldVault`, `collateralToken`, `conditionId`). For an honest yield
+    /// vault `asset()` is fixed, so (`yieldVault`, `conditionId`) alone would already pin the market and
+    /// `collateralToken` is redundant; it is folded in only to defend against a vault whose `asset()` changes between
+    /// calls. Without it, a deposit made under a worthless collateral and a redeem made under a valuable one would
+    /// collide on the same id, letting the redeem drain the valuable side's outcome tokens from the shared position-id
+    /// pool. Callers pass the `collateralToken` they already read from `asset()`, so this adds no extra external call.
+    function _id(IERC4626 yieldVault, IERC20 collateralToken, bytes32 conditionId) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(address(yieldVault), address(collateralToken), conditionId));
+    }
+
+    /// @dev Reads the collateral from `yieldVault.asset()` and uses internal method to return market `id`
+    function _id(IERC4626 yieldVault, bytes32 conditionId) internal view returns (bytes32) {
+        return _id(yieldVault, IERC20(yieldVault.asset()), conditionId);
     }
 
     /// @dev The ERC-1155 position id of the `isYes` side of the (`collateralToken`, `conditionId`) market.

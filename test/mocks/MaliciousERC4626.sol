@@ -11,7 +11,9 @@ import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 /// whatever collateral is deposited (like an honest vault) but otherwise answers however the test configures it.
 /// Implements the full `IERC4626` surface (including its `IERC20` share token) so it can stand in as any vault.
 contract MaliciousERC4626 is IERC4626 {
-    IERC20 public immutable asset_;
+    /// @dev Mutable on purpose: a rogue vault can return one collateral on `deposit` and another on `redeem`. Honest
+    /// vaults never do this, but nothing in ERC-4626 forces `asset()` to be constant.
+    IERC20 public asset_;
 
     string public name = "Evil Vault Shares";
     string public symbol = "eVS";
@@ -49,6 +51,11 @@ contract MaliciousERC4626 is IERC4626 {
     function setFakeAssets(bool on, uint256 value) external {
         useFakeAssets = on;
         fakeAssets = value;
+    }
+
+    /// @dev Flip the reported underlying between calls — models a vault that lies about its collateral.
+    function setAsset(IERC20 newAsset) external {
+        asset_ = newAsset;
     }
 
     function setWithdrawPayoutBips(uint256 bips) external {
