@@ -136,6 +136,20 @@ abstract contract InvariantBaseTest is BaseTest {
         vault.redeem(m.vault, m.conditionId, isYes, shares, msg.sender, msg.sender);
     }
 
+    /// @dev Transfers part of the sender's shares to another tracked actor. Pure bookkeeping: no assets move, so no
+    /// invariant may drift. The recipient is picked from `actors` so share conservation stays checkable.
+    function transferHandler(uint256 marketSeed, bool isYes, uint256 sharesSeed, uint256 toSeed) external {
+        Market memory m = _market(marketSeed);
+
+        uint256 held = vault.sharesOf(m.vault, m.conditionId, isYes, msg.sender);
+        if (held == 0) return;
+        uint256 shares = bound(sharesSeed, 1, held);
+        address to = actors[toSeed % actors.length];
+
+        vm.prank(msg.sender);
+        vault.transfer(m.vault, m.conditionId, isYes, shares, msg.sender, to);
+    }
+
     /// @dev Accrues yield into one of the shared ERC-4626 vaults, lifting that vault's invested balances. Capped in
     /// absolute terms per step: combined with the large 1:1 seed in `setUp`, this keeps each vault's share price near 1
     /// over a long run, so it grows gradually without compounding toward an overflow.

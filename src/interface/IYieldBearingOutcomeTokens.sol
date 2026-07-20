@@ -39,6 +39,17 @@ interface IYieldBearingOutcomeTokens {
         uint256 amount
     );
 
+    /// @notice Emitted on a share transfer on the `isYes` side of market `id`.
+    /// @param id The market the shares were transferred on.
+    /// @param isYes The side transferred, `true` for YES and `false` for NO.
+    /// @param caller The address that initiated the transfer.
+    /// @param onBehalf The address whose shares were transferred.
+    /// @param to The address that received the shares.
+    /// @param shares The amount of shares transferred.
+    event Transfer(
+        bytes32 indexed id, bool isYes, address indexed caller, address onBehalf, address indexed to, uint256 shares
+    );
+
     /// @notice Emitted when `authorizer` sets whether `authorized` may act on its behalf.
     /// @param authorizer The address granting or revoking the authorization.
     /// @param authorized The address being authorized or deauthorized.
@@ -119,6 +130,25 @@ interface IYieldBearingOutcomeTokens {
     function redeem(IERC4626 yieldVault, bytes32 conditionId, bool isYes, uint256 shares, address onBehalf, address to)
         external
         returns (uint256 assets);
+
+    /// @notice Transfers `shares` of the `isYes` side of the (`yieldVault`, `conditionId`) market from `onBehalf`
+    /// to `to`.
+    /// @dev Pure share bookkeeping: no assets move and the side's total shares are unchanged. `msg.sender` must be
+    /// `onBehalf` itself or an address it has authorized via `setAuthorization`.
+    /// @param yieldVault The ERC-4626 vault the market invests merged collateral into; its `asset()` is the collateral.
+    /// @param conditionId The ConditionalTokens condition id of the market.
+    /// @param isYes The side to transfer, `true` for YES and `false` for NO.
+    /// @param shares The amount of shares to transfer.
+    /// @param onBehalf The address whose shares are transferred.
+    /// @param to The address that will receive the shares.
+    function transfer(
+        IERC4626 yieldVault,
+        bytes32 conditionId,
+        bool isYes,
+        uint256 shares,
+        address onBehalf,
+        address to
+    ) external;
 
     /// @notice Returns whether `authorized` may spend `authorizer`'s shares (i.e. redeem on its behalf).
     /// @param authorizer The address that owns the shares.

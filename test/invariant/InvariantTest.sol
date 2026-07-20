@@ -9,11 +9,12 @@ contract InvariantTest is InvariantBaseTest {
     function setUp() public override {
         super.setUp();
 
-        bytes4[] memory selectors = new bytes4[](4);
+        bytes4[] memory selectors = new bytes4[](5);
         selectors[0] = this.depositHandler.selector;
         selectors[1] = this.redeemHandler.selector;
         selectors[2] = this.accrueYieldHandler.selector;
         selectors[3] = this.donateHandler.selector;
+        selectors[4] = this.transferHandler.selector;
         targetSelector(FuzzSelector({addr: address(this), selectors: selectors}));
         targetContract(address(this));
     }

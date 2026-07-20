@@ -224,6 +224,28 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         CONDITIONAL_TOKENS.splitPosition(collateralToken, PARENT_COLLECTION_ID, conditionId, _partition(), amount);
     }
 
+    /* TRANSFER */
+
+    /// @inheritdoc IYieldBearingOutcomeTokens
+    function transfer(
+        IERC4626 yieldVault,
+        bytes32 conditionId,
+        bool isYes,
+        uint256 shares,
+        address onBehalf,
+        address to
+    ) external {
+        require(msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender], Unauthorized());
+
+        bytes32 id = _id(yieldVault, conditionId);
+        Side storage transferSide = side[id][isYes];
+
+        transferSide.shares[onBehalf] -= shares;
+        transferSide.shares[to] += shares;
+
+        emit Transfer(id, isYes, msg.sender, onBehalf, to, shares);
+    }
+
     /* AUTHORIZATION */
 
     /// @inheritdoc IYieldBearingOutcomeTokens
