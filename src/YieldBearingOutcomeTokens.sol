@@ -29,12 +29,24 @@ import {IYieldBearingOutcomeTokens} from "src/interface/IYieldBearingOutcomeToke
 /// once and splitting always succeeds, every redemption can reconstitute the outcome tokens it owes and the contract
 /// stays solvent to the token. A holder of the winning side is simply better off redeeming their shares here and then
 /// redeeming the outcome tokens 1:1 at the ConditionalTokens contract.
+
+//TODO: restructre such that an external contract is deployed that does the merge and deposit + withdraw and split
+// in adding new calls, we also have the benefit of removing some calls as well
+// for each id, new contract is created whoes job is to mergeDeposit + withdrawSplit
+// Some external calls and checks wouldn't be necessary because if the this contract cannot dip into other id's balance at all
+
 contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenReceiver {
     /* ERRORS */
 
     error ApproveFailed();
+    /// @notice Thrown when `conditionId` does not have exactly two outcome slots.
+    error NotBinaryCondition();
+    /// @notice Thrown when `yieldVault.withdraw` did not deliver `amount` of collateral to this contract.
+    error WithdrawShortfall();
     /// @notice Thrown when a self-call-only function is called by an account other than this contract.
     error OnlySelf();
+    /// @notice Thrown when a guarded entry point is reentered before the outer call completed.
+    error ReentrantCall();
     /// @notice Thrown when `msg.sender` is neither `onBehalf` nor authorized to act on its behalf.
     error Unauthorized();
     /// @notice Thrown when `setAuthorization` is called with the value already set.
@@ -46,8 +58,8 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     IConditionalTokens public immutable CONDITIONAL_TOKENS;
 
     /// @notice The parent collection id used for every position. Fixed to zero to restrict the vault to top-level
-    /// markets, i.e. positions not nested under another collection. (Binary-market support is a separate assumption,
-    /// enforced by the hardcoded `{1},{2}` partition.)
+    /// markets, i.e. positions not nested under another collection. Binary markets are a separate restriction,
+    /// enforced by the `outcomeSlotCount == 2` check in `deposit` and the hardcoded `{1},{2}` partition.
     bytes32 public constant PARENT_COLLECTION_ID = bytes32(0);
 
     /// @dev Virtual shares and assets, added to the totals in every share conversion to mitigate share price
@@ -67,6 +79,22 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// @inheritdoc IYieldBearingOutcomeTokens
     mapping(address authorizer => mapping(address authorized => bool)) public isAuthorized;
 
+    /// @dev Reentrancy flag, held in transient storage so it costs a `TSTORE` pair and is wiped at the end of the
+    /// transaction with no explicit refund. Modeled on OpenZeppelin's `ReentrancyGuardTransient`, minus its custom
+    /// ERC-7201 slot and helper indirection: a plain `transient` state variable already gets a dedicated slot.
+    bool private transient entered;
+
+    /* MODIFIERS */
+
+    /// @dev Blocks reentry into the guarded entry points. `mergeAndDeposit` is deliberately left unguarded: it is an
+    /// external self-call made from inside the already-guarded `deposit`, so guarding it would revert every merge.
+    modifier nonReentrant() {
+        require(!entered, ReentrantCall());
+        entered = true;
+        _;
+        entered = false;
+    }
+
     /* CONSTRUCTOR */
 
     /// @param conditionalTokens The ConditionalTokens contract backing every market this vault serves.
@@ -79,8 +107,13 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// @inheritdoc IYieldBearingOutcomeTokens
     function deposit(IERC4626 yieldVault, bytes32 conditionId, bool isYes, uint256 assets, address to)
         external
+        nonReentrant
         returns (uint256 shares)
     {
+        // Non-binary conditions are rejected outright: the hardcoded `{1},{2}` partition cannot merge them back into
+        // collateral, so such a market could never invest. Checked before any state changes so nothing is pulled.
+        require(CONDITIONAL_TOKENS.getOutcomeSlotCount(conditionId) == 2, NotBinaryCondition());
+
         IERC20 collateralToken = IERC20(yieldVault.asset());
         bytes32 id = _id(yieldVault, collateralToken, conditionId);
 
@@ -140,10 +173,9 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     ) external {
         require(msg.sender == address(this), OnlySelf());
 
-        // Assumes a binary market: merging the {1},{2} pair returns collateral. If outcomeSlotCount > 2 this instead
-        // mints a combined ERC1155 position rather than returning collateral, so the deposit below reverts, `deposit`
-        // catches it and both sides stay dangling. Such a market never invests, but every deposit remains redeemable
-        // through the dangling path, so there is no self-harm or stuck funds.
+        // `deposit` rejects anything but a binary condition, so the hardcoded `{1},{2}` partition together with
+        // `PARENT_COLLECTION_ID == 0` pins ConditionalTokens to its `transfer(msg.sender, amount)` branch: the merge
+        // always returns exactly `completeSets` of collateral to this contract.
         CONDITIONAL_TOKENS.mergePositions(
             collateralToken, PARENT_COLLECTION_ID, conditionId, _partition(), completeSets
         );
@@ -159,6 +191,10 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         // shares too and pays gas), so it is uneconomical. If the underlying vault has virtual shares calculation with
         // high decimals offset, the attack impact reduces even further.
         vaultSharesOf[id] += yieldVault.deposit(completeSets, address(this));
+
+        // Revoke any unspent allowance: a vault that under-pulls would otherwise keep a standing claim on this
+        // contract's whole collateral balance, which outlives the transaction.
+        require(collateralToken.approve(address(yieldVault), 0), ApproveFailed());
     }
 
     /* REDEEM */
@@ -166,6 +202,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
     /// @inheritdoc IYieldBearingOutcomeTokens
     function redeem(IERC4626 yieldVault, bytes32 conditionId, bool isYes, uint256 shares, address onBehalf, address to)
         external
+        nonReentrant
         returns (uint256 assets)
     {
         require(msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender], Unauthorized());
@@ -214,7 +251,9 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         bytes32 id,
         uint256 amount
     ) internal {
+        uint256 balanceBeforeWithdraw = collateralToken.balanceOf(address(this));
         vaultSharesOf[id] -= yieldVault.withdraw(amount, address(this), address(this));
+        require(collateralToken.balanceOf(address(this)) - balanceBeforeWithdraw >= amount, WithdrawShortfall());
 
         // `splitPosition` pulls the collateral from this contract, so approve it first. Raw approve with a bool check,
         // the same way ConditionalTokens handles collateral; a token that does not conform cannot back outcome tokens
@@ -234,7 +273,7 @@ contract YieldBearingOutcomeTokens is IYieldBearingOutcomeTokens, IERC1155TokenR
         uint256 shares,
         address onBehalf,
         address to
-    ) external {
+    ) external nonReentrant {
         require(msg.sender == onBehalf || isAuthorized[onBehalf][msg.sender], Unauthorized());
 
         bytes32 id = _id(yieldVault, conditionId);

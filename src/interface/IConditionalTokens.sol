@@ -19,6 +19,9 @@ interface IConditionalTokens is IERC1155 {
         uint256 amount
     ) external;
 
+    /// @notice The number of outcome slots a prepared condition has. Zero if the condition was never prepared.
+    function getOutcomeSlotCount(bytes32 conditionId) external view returns (uint256);
+
     function mergePositions(
         IERC20 collateralToken,
         bytes32 parentCollectionId,

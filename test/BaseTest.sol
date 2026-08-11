@@ -85,7 +85,7 @@ contract BaseTest is Test {
         RECEIVER = makeAddr("Receiver");
         ORACLE = makeAddr("Oracle");
 
-        ct = IConditionalTokensExt(deployCode("ConditionalTokens.sol"));
+        ct = IConditionalTokensExt(deployCode("out/ConditionalTokens.sol/ConditionalTokens.json"));
         vm.label(address(ct), "ConditionalTokens");
 
         collateral = new MockERC20("Collateral", "COL");
