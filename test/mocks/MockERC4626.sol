@@ -4,7 +4,7 @@ pragma solidity ^0.8.34;
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {IERC4626} from "forge-std/interfaces/IERC4626.sol";
 
-/// @notice Minimal but complete ERC-4626 vault sufficient for the YieldBearingOutcomeTokens core. Shares track the
+/// @notice Minimal but complete ERC-4626 vault sufficient for the OutcomeYieldPool core. Shares track the
 /// pool's asset balance, starting 1:1. Implements the full `IERC4626` surface (including its `IERC20` share token) so
 /// it can be used directly as an `IERC4626` rather than only through the subset the core happens to call.
 contract MockERC4626 is IERC4626 {
@@ -95,8 +95,14 @@ contract MockERC4626 is IERC4626 {
         return convertToAssets(shares);
     }
 
-    function previewWithdraw(uint256 assets) external view returns (uint256) {
-        return convertToShares(assets);
+    /// @dev EIP-4626 mandates `previewWithdraw` round UP, so a withdrawal never under-burns. Rounding it down (as
+    /// this mock originally did) is the coverage gap the audit's lead #10 names: it hides the ceil-rounding value
+    /// stranding of finding 4(b) and lets a short redeem look correct.
+    function previewWithdraw(uint256 assets) public view returns (uint256) {
+        uint256 supply = totalSupply;
+        if (supply == 0) return assets;
+        uint256 total = totalAssets();
+        return (assets * supply + total - 1) / total;
     }
 
     function previewRedeem(uint256 shares) external view returns (uint256) {
@@ -122,7 +128,7 @@ contract MockERC4626 is IERC4626 {
     }
 
     function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
-        shares = convertToShares(assets);
+        shares = previewWithdraw(assets);
         _spendShares(owner, shares);
         require(asset_.transfer(receiver, assets), "transfer failed");
         emit Withdraw(msg.sender, receiver, owner, assets, shares);

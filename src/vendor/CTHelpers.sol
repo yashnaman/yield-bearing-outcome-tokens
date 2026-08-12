@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: LGPL-3.0-or-later
 pragma solidity >=0.5.1;
 
-// not in scope for audit. Taken from https://github.com/Polymarket/neg-risk-ctf-adapter/blob/main/src/libraries/CTHelpers.sol
-// forked from Gnosis Condtional Tokens
+// Vendored third-party code — NOT in scope for audit and never edited beyond deleting unused functions.
+// Taken from https://github.com/Polymarket/neg-risk-ctf-adapter/blob/main/src/libraries/CTHelpers.sol
+// which is itself forked from Gnosis ConditionalTokens. Only `getCollectionId` and `getPositionId` are used;
+// they reproduce exactly how ConditionalTokens derives the ids the pool must address its outcome tokens by.
 library CTHelpers {
-    /// @dev Constructs a condition ID from an oracle, a question ID, and the outcome slot count for
-    /// the question.
-    /// @param oracle The account assigned to report the result for the prepared condition.
-    /// @param questionId An identifier for the question to be answered by the oracle.
-    /// @param outcomeSlotCount The number of outcome slots which should be used for this condition.
-    /// Must not exceed 256.
-    function getConditionId(address oracle, bytes32 questionId, uint256 outcomeSlotCount)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encodePacked(oracle, questionId, outcomeSlotCount));
-    }
-
     uint256 constant P = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
     uint256 constant B = 3;
 

@@ -1,3 +1,0 @@
-forge-std/=lib/forge-std/src/
-openzeppelin-solidity/=node_modules/openzeppelin-solidity/
-@gnosis.pm/=node_modules/@gnosis.pm/

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.34;
 
-import {BaseTest} from "test/BaseTest.sol";
+import {BaseTest} from "test/Base.t.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 /// @notice The vault relies only on split/merge at par, which need the condition merely *prepared*, not resolved. So
 /// deposits and redemptions must keep working after the condition is reported.
-contract ResolutionIntegrationTest is BaseTest {
+contract ResolutionTest is BaseTest {
     function _reportYesWins() internal {
         uint256[] memory payouts = new uint256[](2);
         payouts[0] = 1; // YES (slot {1}) wins
@@ -40,7 +40,7 @@ contract ResolutionIntegrationTest is BaseTest {
 
         // Bob actually wants YES (the winner); deposit a matching YES position so he can pull YES out. For simplicity
         // here, Alice (YES depositor) redeems her YES shares back to YES tokens, then claims at CT after resolution.
-        uint256 aliceShares = vault.sharesOf(defaultVault, conditionId, true, ALICE);
+        uint256 aliceShares = factory.balanceOf(ALICE, yesShareId);
         _redeem(ALICE, true, aliceShares);
         assertEq(ct.balanceOf(ALICE, yesPositionId), 100, "Alice holds her YES tokens again");
 

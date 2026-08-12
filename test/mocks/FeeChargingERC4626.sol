@@ -108,8 +108,12 @@ contract FeeChargingERC4626 is IERC4626 {
         return (net * 10_000 + (10_000 - FEE_BIPS) - 1) / (10_000 - FEE_BIPS);
     }
 
-    function previewWithdraw(uint256 assets) external view returns (uint256) {
-        return convertToShares(assets);
+    /// @dev Rounds UP, per EIP-4626, so a withdrawal never under-burns shares.
+    function previewWithdraw(uint256 assets) public view returns (uint256) {
+        uint256 supply = totalSupply;
+        if (supply == 0) return assets;
+        uint256 total = totalAssets();
+        return (assets * supply + total - 1) / total;
     }
 
     function previewRedeem(uint256 shares) external view returns (uint256) {
@@ -149,7 +153,7 @@ contract FeeChargingERC4626 is IERC4626 {
     }
 
     function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
-        shares = convertToShares(assets);
+        shares = previewWithdraw(assets);
         _spendShares(owner, shares);
         require(asset_.transfer(receiver, assets), "transfer failed");
         emit Withdraw(msg.sender, receiver, owner, assets, shares);

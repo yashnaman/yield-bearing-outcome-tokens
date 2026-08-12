@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.34;
 
-import {BaseTest} from "test/BaseTest.sol";
+import {BaseTest} from "test/Base.t.sol";
 
 /// @notice Tests the yield-distribution mechanic: yield accrued in the underlying ERC4626 lifts each side's share
 /// price, and the fully-matched (scarce) side captures the full rate while the surplus side is diluted by its
 /// utilization, exactly as the README describes.
-contract YieldDistributionIntegrationTest is BaseTest {
+contract YieldDistributionTest is BaseTest {
     /// @dev Yield raises the redeemable assets of a fully-matched side proportionally.
     function testYieldLiftsSharePrice() public {
         _deposit(ALICE, true, 100);
@@ -14,7 +14,7 @@ contract YieldDistributionIntegrationTest is BaseTest {
 
         _accrueYield(100); // double the vault's assets -> investedBalance = 200
 
-        assertEq(vault.investedBalance(defaultVault, conditionId), 200, "yield reflected in invested balance");
+        assertEq(_invested(pool), 200, "yield reflected in invested balance");
 
         // Bob's NO shares should now redeem for ~200 (his 100 doubled), minus virtual-offset rounding.
         uint256 assets = _redeem(BOB, false, bobShares);
@@ -27,7 +27,7 @@ contract YieldDistributionIntegrationTest is BaseTest {
         uint256 yesShares = _deposit(ALICE, true, 100);
         uint256 noShares = _deposit(BOB, false, 50); // matched = 50; YES has 50 dangling, NO has 0
 
-        assertEq(vault.investedBalance(defaultVault, conditionId), 50, "50 complete sets invested");
+        assertEq(_invested(pool), 50, "50 complete sets invested");
 
         _accrueYield(50); // investedBalance 50 -> 100
 

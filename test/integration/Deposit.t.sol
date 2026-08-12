@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 pragma solidity ^0.8.34;
 
-import {BaseTest} from "test/BaseTest.sol";
+import {BaseTest} from "test/Base.t.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
+import {IOutcomeYieldPool} from "src/interface/IOutcomeYieldPool.sol";
 
 /// @notice Behavioural tests for `deposit`: share minting math, the merge-and-invest rebalance, events and reverts.
-contract DepositIntegrationTest is BaseTest {
-    event Deposit(
-        bytes32 indexed id, bool isYes, address indexed caller, address indexed to, uint256 amount, uint256 shares
-    );
-
+contract DepositTest is BaseTest {
     /// @dev First deposit on an empty side: shares = assets * VIRTUAL_SHARES / VIRTUAL_ASSETS (totals start at zero).
     function testFirstDepositSharePrice(uint256 amount) public {
         amount = bound(amount, MIN_TEST_AMOUNT, MAX_TEST_AMOUNT);
@@ -17,11 +14,11 @@ contract DepositIntegrationTest is BaseTest {
         uint256 shares = _deposit(ALICE, true, amount);
 
         assertEq(shares, amount * VIRTUAL_SHARES / VIRTUAL_ASSETS, "first deposit share price");
-        assertEq(vault.totalShares(defaultVault, conditionId, true), shares, "totalShares updated");
-        assertEq(vault.sharesOf(defaultVault, conditionId, true, ALICE), shares, "user shares credited");
+        assertEq(factory.totalSupply(yesShareId), shares, "totalShares updated");
+        assertEq(factory.balanceOf(ALICE, yesShareId), shares, "user shares credited");
         // No opposite side yet, so nothing merges; the deposit stays dangling and the vault holds the tokens.
-        assertEq(vault.investedBalance(defaultVault, conditionId), 0, "nothing invested without a match");
-        assertEq(_vaultPositionBalance(yesPositionId), amount, "vault holds the dangling YES tokens");
+        assertEq(_invested(pool), 0, "nothing invested without a match");
+        assertEq(_poolPositionBalance(yesPositionId), amount, "vault holds the dangling YES tokens");
     }
 
     /// @dev Depositing the opposite side matches complete sets, which are merged into collateral and invested.
@@ -34,10 +31,10 @@ contract DepositIntegrationTest is BaseTest {
 
         uint256 matched = yesAmount < noAmount ? yesAmount : noAmount;
 
-        assertEq(vault.investedBalance(defaultVault, conditionId), matched, "complete sets invested");
+        assertEq(_invested(pool), matched, "complete sets invested");
         // Each side keeps only its surplus over the match as dangling tokens.
-        assertEq(_vaultPositionBalance(yesPositionId), yesAmount - matched, "YES surplus dangling");
-        assertEq(_vaultPositionBalance(noPositionId), noAmount - matched, "NO surplus dangling");
+        assertEq(_poolPositionBalance(yesPositionId), yesAmount - matched, "YES surplus dangling");
+        assertEq(_poolPositionBalance(noPositionId), noAmount - matched, "NO surplus dangling");
     }
 
     /// @dev A deposit into a side whose assets have all been merged still mints shares 1:1 against invested balance.
@@ -55,16 +52,15 @@ contract DepositIntegrationTest is BaseTest {
     /// @dev Shares are credited to `to`, never to the caller, for any receiver address.
     function testDepositToFuzzedReceiver(address to, uint256 amount) public {
         amount = bound(amount, MIN_TEST_AMOUNT, MAX_TEST_AMOUNT);
+        // ERC-6909 rejects the zero address as a mint receiver, so shares cannot be burned by accident.
+        vm.assume(to != address(0));
 
         _mintOutcomeTokens(ALICE, amount);
-        vm.prank(ALICE);
-        uint256 shares = vault.deposit(defaultVault, conditionId, true, amount, to);
+        uint256 shares = _depositAs(pool, ALICE, true, amount, to);
 
-        assertEq(vault.sharesOf(defaultVault, conditionId, true, to), shares, "shares credited to receiver");
+        assertEq(factory.balanceOf(to, yesShareId), shares, "shares credited to receiver");
         if (to != ALICE) {
-            assertEq(
-                vault.sharesOf(defaultVault, conditionId, true, ALICE), 0, "caller receives nothing when to != caller"
-            );
+            assertEq(factory.balanceOf(ALICE, yesShareId), 0, "caller receives nothing when to != caller");
         }
     }
 
@@ -72,15 +68,13 @@ contract DepositIntegrationTest is BaseTest {
         _mintOutcomeTokens(ALICE, 100);
 
         uint256 expectedShares = 100 * VIRTUAL_SHARES / VIRTUAL_ASSETS;
-        vm.expectEmit(true, true, true, true, address(vault));
-        emit Deposit(id, true, ALICE, BOB, 100, expectedShares);
+        vm.expectEmit(true, true, true, true, address(pool));
+        emit IOutcomeYieldPool.Deposit(true, ALICE, BOB, 100, expectedShares);
 
         vm.prank(ALICE);
-        vault.deposit(defaultVault, conditionId, true, 100, BOB);
+        pool.deposit(true, 100, BOB);
 
-        assertEq(
-            vault.sharesOf(defaultVault, conditionId, true, BOB), expectedShares, "shares minted to `to`, not caller"
-        );
+        assertEq(factory.balanceOf(BOB, yesShareId), expectedShares, "shares minted to `to`, not caller");
     }
 
     /// @dev The vault only accepts outcome tokens forwarded by ConditionalTokens; depositing without approval reverts.
@@ -94,7 +88,7 @@ contract DepositIntegrationTest is BaseTest {
         collateral.approve(address(ct), 100);
         ct.splitPosition(IERC20(address(collateral)), PARENT_COLLECTION_ID, conditionId, partition, 100);
         vm.expectRevert();
-        vault.deposit(defaultVault, conditionId, true, 100, ALICE);
+        pool.deposit(true, 100, ALICE);
         vm.stopPrank();
     }
 
@@ -107,7 +101,7 @@ contract DepositIntegrationTest is BaseTest {
         // ignores raw balances and prices off internal dangling + invested, so this does not move the share price.
         _mintOutcomeTokens(CAROL, 1e18);
         vm.prank(CAROL);
-        ct.safeTransferFrom(CAROL, address(vault), yesPositionId, 1e18, "");
+        ct.safeTransferFrom(CAROL, address(pool), yesPositionId, 1e18, "");
 
         // Victim deposits and must still receive a fair (non-zero, ~proportional) share allocation.
         uint256 victimShares = _deposit(BOB, true, 1e18);

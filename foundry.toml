@@ -2,8 +2,26 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+# NOTE: solc is deliberately NOT pinned here. `test/vendor/CTImport.sol` compiles the real Gnosis ConditionalTokens
+# (Solidity 0.5.x) so the tests can deploy it, and a global `solc` pin applies to every source, which makes that
+# fixture unbuildable. First-party code is held to one version by its `pragma ^0.8.34` instead.
 optimizer = true
 optimizer_runs = 4294967295 # max
+
+# Single source of truth for import paths. The ConditionalTokens fixture the tests deploy is Solidity 0.5.x, which is
+# why the two npm packages are here alongside the forge submodules.
+remappings = [
+    "forge-std/=lib/forge-std/src/",
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@gnosis.pm/=node_modules/@gnosis.pm/",
+    "openzeppelin-solidity/=node_modules/openzeppelin-solidity/",
+]
+
+[fmt]
+line_length = 120
+tab_width = 4
+bracket_spacing = false
+int_types = "long"
 
 # Local profile: keep fuzz/invariant runs light so the suite is fast to iterate on.
 [profile.default.fuzz]
